@@ -17,38 +17,68 @@ class LeaveController extends Controller
 
     // ==================== WEB METHODS ====================
 
-    public function index(Request $request)
-    {
-        try {
-            $leaves = $this->firebase->getAllLeaves();
-            $employees = $this->firebase->getCompanyEmployees();
+public function index(Request $request)
+{
+    try {
+        // Ambil semua leaves dari Firebase (array)
+        $allLeaves = $this->firebase->getAllLeaves();
 
-            // Filter by status
-            $status = $request->get('status');
-            if ($status && $status !== 'all') {
-                $leaves = array_filter($leaves, function($leave) use ($status) {
-                    return ($leave['status'] ?? 'pending') === $status;
-                });
-            }
-
-            // Filter by employee
-            $employeeId = $request->get('employee_id');
-            if ($employeeId) {
-                $leaves = array_filter($leaves, function($leave) use ($employeeId) {
-                    return $leave['employeeId'] === $employeeId;
-                });
-            }
-
-            return view('leaves.index', compact('leaves', 'employees', 'status', 'employeeId'));
-
-        } catch (\Exception $e) {
-            return view('leaves.index', [
-                'leaves' => [],
-                'employees' => [],
-                'error' => $e->getMessage()
-            ]);
+        // Filter by status
+        $status = $request->get('status', 'all');
+        if ($status !== 'all') {
+            $allLeaves = array_filter($allLeaves, function ($leave) use ($status) {
+                return ($leave['status'] ?? 'pending') === $status;
+            });
         }
+
+        // Filter by employee
+        $employeeId = $request->get('employee_id');
+        if ($employeeId) {
+            $allLeaves = array_filter($allLeaves, function ($leave) use ($employeeId) {
+                return $leave['employeeId'] === $employeeId;
+            });
+        }
+
+        // Re-index array setelah filter (penting agar tidak ada key hilang)
+        $allLeaves = array_values($allLeaves);
+
+        // Pagination manual
+        $perPage = 10; // jumlah item per halaman, bisa diubah sesuai kebutuhan
+        $currentPage = max(1, $request->get('page', 1));
+        $total = count($allLeaves);
+
+        // Potong data sesuai halaman saat ini
+        $offset = ($currentPage - 1) * $perPage;
+        $paginatedLeaves = array_slice($allLeaves, $offset, $perPage);
+
+        // Buat objek paginator manual
+        $leaves = new \Illuminate\Pagination\LengthAwarePaginator(
+            $paginatedLeaves,           // item untuk halaman ini
+            $total,                     // total keseluruhan
+            $perPage,                   // per halaman
+            $currentPage,               // halaman saat ini
+            ['path' => $request->url()] // agar link pagination benar
+        );
+
+        $employees = $this->firebase->getCompanyEmployees();
+
+        return view('leaves.index', compact(
+            'leaves',
+            'employees',
+            'status',
+            'employeeId'
+        ));
+
+    } catch (\Exception $e) {
+        return view('leaves.index', [
+            'leaves' => new \Illuminate\Pagination\LengthAwarePaginator([], 0, 10),
+            'employees' => [],
+            'error' => $e->getMessage(),
+            'status' => 'all',
+            'employeeId' => null
+        ]);
     }
+}
 
     public function create()
     {
