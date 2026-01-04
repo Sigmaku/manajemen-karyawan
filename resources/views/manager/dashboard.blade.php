@@ -2,14 +2,14 @@
 
 @section('content')
 <div class="container-fluid">
-    <h1 class="h3 mb-4">Admin Dashboard</h1>
+    <h1 class="h3 mb-4">Manager Dashboard</h1>
 
-    <!-- Admin Stats -->
+    <!-- Manager Stats -->
     <div class="row mb-4">
         <div class="col-xl-3 col-md-6">
             <div class="card bg-primary text-white mb-4">
                 <div class="card-body">
-                    <h6 class="mb-0">Total Employees</h6>
+                    <h6 class="mb-0">Team Members</h6>
                     <h2 class="mt-2">{{ $stats['total_employees'] ?? 0 }}</h2>
                 </div>
             </div>
@@ -33,8 +33,13 @@
         <div class="col-xl-3 col-md-6">
             <div class="card bg-info text-white mb-4">
                 <div class="card-body">
-                    <h6 class="mb-0">Active Employees</h6>
-                    <h2 class="mt-2">{{ $stats['active_employees'] ?? 0 }}</h2>
+                    <h6 class="mb-0">Attendance Rate</h6>
+                    @php
+                        $total = $stats['total_employees'] ?? 1;
+                        $present = $stats['present_today'] ?? 0;
+                        $rate = $total > 0 ? round(($present / $total) * 100, 1) : 0;
+                    @endphp
+                    <h2 class="mt-2">{{ $rate }}%</h2>
                 </div>
             </div>
         </div>
@@ -44,16 +49,17 @@
     <div class="row">
         <!-- Left Column -->
         <div class="col-md-8">
-            <!-- Today's Attendance -->
+            <!-- Team Attendance -->
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Today's Attendance ({{ date('F d, Y') }})</h5>
+                    <h5 class="mb-0">Team Attendance Today ({{ date('F d, Y') }})</h5>
                     <div>
                         <span class="badge bg-success">Present: {{ count($attendanceList) }}</span>
                         <span class="badge bg-danger ms-2">Absent: {{ $stats['total_employees'] - count($attendanceList) }}</span>
                     </div>
                 </div>
                 <div class="card-body">
+                    @if(count($attendanceList) > 0)
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead>
@@ -62,21 +68,18 @@
                                     <th>Department</th>
                                     <th>Check In</th>
                                     <th>Check Out</th>
-                                    <th>Location</th>
                                     <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                @forelse($attendanceList as $item)
+                                @foreach($attendanceList as $item)
                                 <tr>
                                     <td>
-                                        <strong>{{ $item['employee']['name'] ?? 'Unknown' }}</strong><br>
-                                        <small class="text-muted">{{ $item['employee']['position'] ?? '-' }}</small>
+                                        <strong>{{ $item['employee']['name'] ?? 'Unknown' }}</strong>
                                     </td>
                                     <td>{{ $item['employee']['department'] ?? '-' }}</td>
                                     <td>{{ $item['attendance']['checkIn'] ?? '-' }}</td>
                                     <td>{{ $item['attendance']['checkOut'] ?? '-' }}</td>
-                                    <td>{{ $item['attendance']['location'] ?? 'Office' }}</td>
                                     <td>
                                         @if(isset($item['attendance']['checkIn']))
                                             <span class="badge bg-success">Present</span>
@@ -85,31 +88,29 @@
                                         @endif
                                     </td>
                                 </tr>
-                                @empty
-                                <tr>
-                                    <td colspan="6" class="text-center py-4">
-                                        <div class="text-muted">
-                                            <i class="fas fa-clock fa-2x mb-3"></i>
-                                            <p>No attendance recorded yet for today</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                                @endforelse
+                                @endforeach
                             </tbody>
                         </table>
                     </div>
+                    @else
+                    <div class="text-center py-5">
+                        <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                        <p class="text-muted">No attendance data available for today</p>
+                    </div>
+                    @endif
                 </div>
             </div>
 
             <!-- Department Stats -->
             <div class="card">
                 <div class="card-header">
-                    <h5 class="mb-0">Employees by Department</h5>
+                    <h5 class="mb-0">Team Distribution</h5>
                 </div>
                 <div class="card-body">
+                    @if(count($departmentStats) > 0)
                     <div class="row">
                         @foreach($departmentStats as $dept => $count)
-                        <div class="col-md-3 col-6 mb-3">
+                        <div class="col-md-4 col-6 mb-3">
                             <div class="card text-center">
                                 <div class="card-body">
                                     <h6 class="text-muted">{{ $dept }}</h6>
@@ -120,102 +121,84 @@
                         </div>
                         @endforeach
                     </div>
+                    @else
+                    <div class="text-center py-4">
+                        <p class="text-muted">No department data available</p>
+                    </div>
+                    @endif
                 </div>
             </div>
         </div>
 
         <!-- Right Column -->
         <div class="col-md-4">
-            <!-- Quick Actions -->
+            <!-- Manager Actions (DIPERBAIKI: Hanya tombol yang diperlukan) -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">Quick Actions</h5>
+                    <h5 class="mb-0">Manager Actions</h5>
                 </div>
                 <div class="card-body">
                     <div class="d-grid gap-2">
-                        <a href="{{ route('employees.create') }}" class="btn btn-primary">
-                            <i class="fas fa-user-plus me-2"></i>Add Employee
-                        </a>
-                        <a href="{{ route('employees.index') }}" class="btn btn-success">
-                            <i class="fas fa-users me-2"></i>Manage Employees
-                        </a>
-                        <a href="{{ route('attendance.dashboard') }}" class="btn btn-info">
-                            <i class="fas fa-clock me-2"></i>Attendance
-                        </a>
                         <a href="{{ route('leaves.index') }}" class="btn btn-warning">
-                            <i class="fas fa-calendar-alt me-2"></i>Leave Requests
+                            <i class="fas fa-calendar-check me-2"></i>Approve Leaves
                         </a>
-                        <a href="{{ route('admin.dashboard') }}" class="btn btn-dark">
-                            <i class="fas fa-user-shield me-2"></i>Admin Panel
+                        <a href="{{ route('attendance.report') }}" class="btn btn-info">
+                            <i class="fas fa-chart-bar me-2"></i>View Reports
                         </a>
                     </div>
                 </div>
             </div>
 
-            <!-- Recent Leave Requests -->
+            <!-- Pending Approvals -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">Recent Leave Requests</h5>
+                    <h5 class="mb-0">Pending Approvals</h5>
                 </div>
                 <div class="card-body">
-                    @forelse($recentLeaves as $leaveId => $leave)
-                    <div class="mb-3 pb-3 border-bottom">
-                        <div class="d-flex justify-content-between align-items-center">
+                    @php
+                        $pendingCount = $stats['pending_leaves'] ?? 0;
+                    @endphp
+
+                    @if($pendingCount > 0)
+                    <div class="alert alert-warning">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-exclamation-triangle fa-2x me-3"></i>
                             <div>
-                                <strong>
-                                    @php
-                                        $employeeId = $leave['employeeId'] ?? '';
-                                        $employee = $employees[$employeeId] ?? [];
-                                    @endphp
-                                    {{ $employee['name'] ?? 'Unknown' }}
-                                </strong>
-                                <div>
-                                    <small class="text-muted">
-                                        {{ $leave['type'] ?? 'Annual' }} Leave
-                                    </small>
-                                </div>
+                                <h6 class="mb-1">{{ $pendingCount }} Pending Leave Requests</h6>
+                                <p class="mb-0">Need your approval</p>
                             </div>
-                            <span class="badge bg-{{ $leave['status'] == 'pending' ? 'warning' : ($leave['status'] == 'approved' ? 'success' : 'danger') }}">
-                                {{ ucfirst($leave['status'] ?? 'pending') }}
-                            </span>
                         </div>
-                        <small class="text-muted">
-                            {{ date('M d', strtotime($leave['startDate'] ?? '')) }} -
-                            {{ date('M d', strtotime($leave['endDate'] ?? '')) }}
-                        </small>
                     </div>
-                    @empty
+                    <a href="{{ route('leaves.index') }}" class="btn btn-warning w-100">
+                        <i class="fas fa-calendar-alt me-2"></i>Review Now
+                    </a>
+                    @else
                     <div class="text-center py-3">
                         <i class="fas fa-check-circle fa-2x text-success mb-3"></i>
-                        <p>No recent leave requests</p>
+                        <p>No pending approvals</p>
+                        <small class="text-muted">All leave requests are processed</small>
                     </div>
-                    @endforelse
-
-                    @if(count($recentLeaves) > 0)
-                    <a href="{{ route('leaves.index') }}" class="btn btn-sm btn-outline-primary w-100">
-                        View All Requests
-                    </a>
                     @endif
                 </div>
             </div>
 
-            <!-- System Info -->
+            <!-- Quick Team Stats -->
             <div class="card">
                 <div class="card-header">
-                    <h5 class="mb-0">System Information</h5>
+                    <h5 class="mb-0">Team Quick Stats</h5>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <small class="text-muted">Company</small>
-                        <p class="mb-1">{{ env('APP_NAME', 'Employee Management System') }}</p>
+                        <small class="text-muted">Total Team Members</small>
+                        <p class="mb-1">{{ $stats['total_employees'] ?? 0 }}</p>
                     </div>
                     <div class="mb-3">
-                        <small class="text-muted">Database</small>
-                        <p class="mb-1">Firebase Realtime</p>
+                        <small class="text-muted">Present Today</small>
+                        <p class="mb-1">{{ $stats['present_today'] ?? 0 }} employees</p>
                     </div>
                     <div class="mb-3">
-                        <small class="text-muted">Total Users</small>
-                        <p class="mb-1">{{ count($employees) }} employees</p>
+                        <small class="text-muted">Departments</small>
+                        <p class="mb-1">{{ count($departmentStats) }} departments</p>
                     </div>
                     <div>
                         <small class="text-muted">Today's Date</small>

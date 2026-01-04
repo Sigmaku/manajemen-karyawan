@@ -46,80 +46,129 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 // ==================== PROTECTED ROUTES ====================
 Route::middleware(['auth.check'])->group(function () {
 
-    // Dashboard
+    // Dashboard - Role based
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
-    // Profile
+    // Profile - All roles
     Route::get('/profile', [ProfileController::class, 'index'])->name('profile');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
 
-    // Settings
+    // Settings - All roles
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
 
-    // Employees
-    Route::resource('employees', EmployeeController::class);
-
-    // Attendance
-    Route::prefix('attendance')->group(function () {
-        Route::get('/dashboard', [AttendanceController::class, 'dashboard'])->name('attendance.dashboard');
-        Route::post('/check-in', [AttendanceController::class, 'checkIn'])->name('attendance.check-in');
-        Route::post('/check-out', [AttendanceController::class, 'checkOut'])->name('attendance.check-out');
-        Route::get('/report', [AttendanceController::class, 'report'])->name('attendance.report');
-        Route::get('/report/{employeeId}', [AttendanceController::class, 'employeeReport'])->name('attendance.report.employee');
-        Route::get('/report/{employeeId}/{month}', [AttendanceController::class, 'employeeMonthlyReport'])->name('attendance.report.employee.monthly');
-        Route::post('/manual', [AttendanceController::class, 'manualEntry'])->name('attendance.manual');
-        Route::get('/history', [AttendanceController::class, 'history'])->name('attendance.history');
+    // ==================== EMPLOYEE ROUTES ====================
+    // Employee Management - Admin & Manager only
+    Route::middleware(['role:admin,manager'])->prefix('employees')->name('employees.')->group(function () {
+        Route::get('/', [EmployeeController::class, 'index'])->name('index');
+        Route::get('/create', [EmployeeController::class, 'create'])->name('create');
+        Route::post('/', [EmployeeController::class, 'store'])->name('store');
+        Route::get('/{id}', [EmployeeController::class, 'show'])->name('show');
+        Route::get('/{id}/edit', [EmployeeController::class, 'edit'])->name('edit');
+        Route::put('/{id}', [EmployeeController::class, 'update'])->name('update');
+        Route::delete('/{id}', [EmployeeController::class, 'destroy'])->name('destroy');
     });
 
-    // Leaves
-    Route::resource('leaves', LeaveController::class)->except(['update']);
-    Route::prefix('leaves')->group(function () {
-        Route::get('/calendar', [LeaveController::class, 'calendar'])->name('leaves.calendar');
-        Route::get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('leaves.my');
-        Route::post('/{id}/approve', [LeaveController::class, 'approve'])->name('leaves.approve');
-        Route::post('/{id}/reject', [LeaveController::class, 'reject'])->name('leaves.reject');
-        Route::post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('leaves.cancel');
+    // ==================== ATTENDANCE ROUTES ====================
+    // Attendance Routes - All roles with different access
+    Route::prefix('attendance')->name('attendance.')->group(function () {
+        // Dashboard - All roles (different views)
+        Route::get('/dashboard', [AttendanceController::class, 'dashboard'])->name('dashboard');
+
+        // Reports - All roles (employee sees only their own)
+        Route::get('/report', [AttendanceController::class, 'report'])->name('report');
+
+        // History - All roles (employee sees only their own)
+        Route::get('/history', [AttendanceController::class, 'history'])->name('history');
+
+        // Check-in/out - Employees only
+        Route::middleware(['role:employee'])->group(function () {
+            Route::post('/check-in', [AttendanceController::class, 'checkIn'])->name('check-in');
+            Route::post('/check-out', [AttendanceController::class, 'checkOut'])->name('check-out');
+        });
+
+        // Manual entry - Admin only
+        Route::middleware(['role:admin'])->post('/manual', [AttendanceController::class, 'manualEntry'])->name('manual');
     });
 
-    // Reports
-    Route::prefix('reports')->group(function () {
-        Route::get('/attendance', [ReportController::class, 'attendance'])->name('reports.attendance');
-        Route::get('/employees', [ReportController::class, 'employees'])->name('reports.employees');
-        Route::get('/leaves', [ReportController::class, 'leaves'])->name('reports.leaves');
-        Route::get('/analytics', [ReportController::class, 'analytics'])->name('reports.analytics');
-        Route::get('/export/attendance', [ReportController::class, 'exportAttendance'])->name('reports.export.attendance');
-        Route::get('/export/employees', [ReportController::class, 'exportEmployees'])->name('reports.export.employees');
+    // ==================== LEAVE ROUTES ====================
+    // Leaves - All roles with different access
+    Route::prefix('leaves')->name('leaves.')->group(function () {
+        // Index - All roles see different data
+        Route::get('/', [LeaveController::class, 'index'])->name('index');
+
+        // Create - All employees can apply
+        Route::get('/create', [LeaveController::class, 'create'])->name('create');
+        Route::post('/', [LeaveController::class, 'store'])->name('store');
+
+        // Show - All roles (employee sees only their own)
+        Route::get('/{id}', [LeaveController::class, 'show'])->name('show');
+
+        // Edit - All employees can edit their own pending leaves
+        Route::get('/{id}/edit', [LeaveController::class, 'edit'])->name('edit');
+
+        // Destroy - All employees can delete their own pending leaves
+        Route::delete('/{id}', [LeaveController::class, 'destroy'])->name('destroy');
+
+        // My leaves - Employees only
+        Route::get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
+
+        // Calendar - Admin & Manager only
+        Route::middleware(['role:admin,manager'])->get('/calendar', [LeaveController::class, 'calendar'])->name('calendar');
+
+        // Approve/Reject - Admin & Manager only
+        Route::middleware(['role:admin,manager'])->group(function () {
+            Route::post('/{id}/approve', [LeaveController::class, 'approve'])->name('approve');
+            Route::post('/{id}/reject', [LeaveController::class, 'reject'])->name('reject');
+        });
+
+        // Cancel - Employees can cancel their own pending leaves
+        Route::post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('cancel');
     });
 
-    // Admin Routes
-    Route::prefix('admin')->name('admin.')->group(function () {
-    // Dashboard
-    Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('dashboard');
+    // ==================== REPORT ROUTES ====================
+    // Reports - Admin & Manager only (READ ONLY)
+    Route::middleware(['role:admin,manager'])->prefix('reports')->name('reports.')->group(function () {
+        Route::get('/attendance', [ReportController::class, 'attendance'])->name('attendance');
+        Route::get('/employees', [ReportController::class, 'employees'])->name('employees');
+        Route::get('/leaves', [ReportController::class, 'leaves'])->name('leaves');
+        Route::get('/analytics', [ReportController::class, 'analytics'])->name('analytics');
 
-    // User Management
-    Route::get('/users', [AdminController::class, 'users'])->name('users');
-    Route::post('/users', [AdminController::class, 'createUser'])->name('users.create');
-    Route::post('/users/{id}/reset-password', [AdminController::class, 'resetPassword'])->name('users.reset');
+        // Export routes
+        Route::get('/export/attendance', [ReportController::class, 'exportAttendance'])->name('export.attendance');
+        Route::get('/export/employees', [ReportController::class, 'exportEmployees'])->name('export.employees');
+        Route::get('/export/leaves', [ReportController::class, 'exportLeaves'])->name('export.leaves');
+    });
 
-    // System Logs
-    Route::get('/logs', [AdminController::class, 'logs'])->name('logs');
+    // ==================== ADMIN ROUTES ====================
+    // Admin Panel - Admin only
+    Route::middleware(['role:admin'])->prefix('admin')->name('admin.')->group(function () {
+        // Dashboard
+        Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('dashboard');
 
-    // Backup & Restore
-    Route::get('/backup', [AdminController::class, 'backup'])->name('backup');
-    Route::post('/backup', [AdminController::class, 'createBackup'])->name('backup.create');
-    Route::post('/backup/{id}/restore', [AdminController::class, 'restoreBackup'])->name('backup.restore');
+        // User Management
+        Route::get('/users', [AdminController::class, 'users'])->name('users');
+        Route::post('/users', [AdminController::class, 'createUser'])->name('users.create');
+        Route::post('/users/{id}/reset-password', [AdminController::class, 'resetPassword'])->name('users.reset');
 
-    // System Settings
-    Route::get('/settings', [AdminController::class, 'systemSettings'])->name('settings');
-    Route::put('/settings', [AdminController::class, 'updateSystemSettings'])->name('settings.update');
+        // System Logs
+        Route::get('/logs', [AdminController::class, 'logs'])->name('logs');
 
-    // Bulk Operations
-    Route::post('/employees/bulk-delete', [EmployeeController::class, 'bulkDelete'])->name('employees.bulk.delete');
-    Route::post('/employees/bulk-status', [EmployeeController::class, 'bulkStatus'])->name('employees.bulk.status');
-    Route::post('/attendance/bulk-entry', [AttendanceController::class, 'bulkEntry'])->name('attendance.bulk.entry');
-    Route::post('/leaves/bulk-approve', [LeaveController::class, 'bulkApprove'])->name('leaves.bulk.approve');
-});
+        // Backup & Restore
+        Route::get('/backup', [AdminController::class, 'backup'])->name('backup');
+        Route::post('/backup', [AdminController::class, 'createBackup'])->name('backup.create');
+        Route::post('/backup/{id}/restore', [AdminController::class, 'restoreBackup'])->name('backup.restore');
+
+        // System Settings
+        Route::get('/settings', [AdminController::class, 'systemSettings'])->name('settings');
+        Route::put('/settings', [AdminController::class, 'updateSystemSettings'])->name('settings.update');
+
+        // Bulk Operations
+        Route::post('/employees/bulk-delete', [AdminController::class, 'bulkDelete'])->name('employees.bulk.delete');
+        Route::post('/employees/bulk-status', [AdminController::class, 'bulkStatus'])->name('employees.bulk.status');
+        Route::post('/attendance/bulk-entry', [AdminController::class, 'bulkEntry'])->name('attendance.bulk.entry');
+        Route::post('/leaves/bulk-approve', [AdminController::class, 'bulkApprove'])->name('leaves.bulk.approve');
+    });
 });
 
 // ==================== FALLBACK ROUTES ====================

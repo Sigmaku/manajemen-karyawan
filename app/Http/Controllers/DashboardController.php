@@ -19,51 +19,71 @@ class DashboardController extends Controller
 
     public function index()
     {
-        $db = $this->firebase->getDatabase();
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $employeeId = $user['employee_id'] ?? null;
 
-        // Get counts
-        $employees = $db->getReference('employees')->getValue() ?: [];
-        $today = date('Y-m-d');
-        $month = date('Y-m');
+        // Get dashboard stats
+        $stats = $this->firebase->getDashboardStats();
+        $employees = $this->firebase->getCompanyEmployees();
+        $todayAttendance = $this->firebase->getTodayAttendance();
 
-        $present = 0;
-        $absent = 0;
-        $onLeave = 0;
-
-        $attendance = $db->getReference("attendances/$month")->getValue() ?: [];
-        foreach ($attendance as $empId => $days) {
-            if (isset($days[$today])) {
-                $present++;
-            } else {
-                $absent++;
+        // Format attendance list
+        $attendanceList = [];
+        foreach ($todayAttendance as $empId => $record) {
+            if (isset($employees[$empId])) {
+                $attendanceList[] = [
+                    'employee' => $employees[$empId],
+                    'attendance' => $record,
+                    'employee_id' => $empId
+                ];
             }
         }
 
-        // Check leaves for today
-        $leaves = $db->getReference('leaves')->getValue() ?: [];
-        foreach ($leaves as $leave) {
-            if ($leave['status'] == 'approved' &&
-                $today >= $leave['start_date'] &&
-                $today <= $leave['end_date']) {
-                $onLeave++;
+        // Different views based on role
+        if ($role === 'admin') {
+            // Count employees by department for admin
+            $departmentStats = [];
+            foreach ($employees as $employee) {
+                $dept = $employee['department'] ?? 'Other';
+                if (!isset($departmentStats[$dept])) {
+                    $departmentStats[$dept] = 0;
+                }
+                $departmentStats[$dept]++;
             }
+
+            // Get recent leaves for admin
+            $recentLeaves = $this->firebase->getAllLeaves();
+            $recentLeaves = array_slice($recentLeaves, 0, 5, true);
+
+            return view('admin.dashboard', compact('stats', 'attendanceList', 'employees', 'departmentStats', 'recentLeaves'));
+
+        } elseif ($role === 'manager') {
+            // Get department stats for manager
+            $departmentStats = [];
+            foreach ($employees as $employee) {
+                $dept = $employee['department'] ?? 'Other';
+                if (!isset($departmentStats[$dept])) {
+                    $departmentStats[$dept] = 0;
+                }
+                $departmentStats[$dept]++;
+            }
+
+            return view('manager.dashboard', compact('stats', 'attendanceList', 'employees', 'departmentStats'));
+
+        } else {
+            // Employee dashboard
+            $employeeAttendance = [];
+            $employeeLeaves = [];
+
+            if ($employeeId) {
+                // Get current month attendance
+                $employeeAttendance = $this->firebase->getEmployeeAttendance($employeeId, date('Y-m'));
+                $employeeLeaves = $this->firebase->getEmployeeLeaves($employeeId);
+            }
+
+            return view('employee.dashboard', compact('stats', 'employeeAttendance', 'employeeLeaves'));
         }
-
-        // Recent activities
-        $activities = $db->getReference('activities')
-            ->orderByChild('timestamp')
-            ->limitToLast(10)
-            ->getValue() ?: [];
-        $activities = array_reverse($activities);
-
-        return view('dashboard', [
-            'totalEmployees' => count($employees),
-            'presentToday' => $present,
-            'absentToday' => $absent,
-            'onLeave' => $onLeave,
-            'recentEmployees' => array_slice($employees, -5, 5, true),
-            'activities' => $activities
-        ]);
     }
 
     // ==================== API METHODS ====================
@@ -71,43 +91,11 @@ class DashboardController extends Controller
     public function apiStats(): JsonResponse
     {
         try {
-            $db = $this->firebase->getDatabase();
-
-            $employees = $db->getReference('employees')->getValue() ?: [];
-            $today = date('Y-m-d');
-            $month = date('Y-m');
-
-            $present = 0;
-            $absent = 0;
-            $onLeave = 0;
-
-            $attendance = $db->getReference("attendances/$month")->getValue() ?: [];
-            foreach ($attendance as $empId => $days) {
-                if (isset($days[$today])) {
-                    $present++;
-                } else {
-                    $absent++;
-                }
-            }
-
-            $leaves = $db->getReference('leaves')->getValue() ?: [];
-            foreach ($leaves as $leave) {
-                if ($leave['status'] == 'approved' &&
-                    $today >= $leave['start_date'] &&
-                    $today <= $leave['end_date']) {
-                    $onLeave++;
-                }
-            }
+            $stats = $this->firebase->getDashboardStats();
 
             return response()->json([
                 'success' => true,
-                'data' => [
-                    'total_employees' => count($employees),
-                    'present_today' => $present,
-                    'absent_today' => $absent,
-                    'on_leave' => $onLeave,
-                    'date' => $today
-                ],
+                'data' => $stats,
                 'message' => 'Dashboard stats retrieved'
             ]);
 
@@ -123,14 +111,8 @@ class DashboardController extends Controller
     public function apiActivities(): JsonResponse
     {
         try {
-            $db = $this->firebase->getDatabase();
-
-            $activities = $db->getReference('activities')
-                ->orderByChild('timestamp')
-                ->limitToLast(20)
-                ->getValue() ?: [];
-
-            $activities = array_reverse($activities);
+            // Placeholder - implement if you have activities collection in Firebase
+            $activities = [];
 
             return response()->json([
                 'success' => true,

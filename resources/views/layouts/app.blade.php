@@ -16,20 +16,6 @@
     <!-- DataTables CSS -->
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
 
-    <!-- Select2 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
-
-    <!-- Flatpickr CSS (untuk date picker) -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
-
     <!-- Custom Styles -->
     <style>
         :root {
@@ -58,6 +44,7 @@
             position: fixed;
             width: 250px;
             transition: all 0.3s;
+            z-index: 1000;
         }
 
         .main-content {
@@ -236,27 +223,13 @@
             <!-- Right Side Navbar -->
             <div class="navbar-collapse collapse justify-content-end">
                 <ul class="navbar-nav">
-                    <!-- Notifications Dropdown -->
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="fas fa-bell"></i>
-                            <span class="badge bg-danger rounded-pill" id="notificationCount">3</span>
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><h6 class="dropdown-header">Notifications</h6></li>
-                            <li><a class="dropdown-item" href="#"><i class="fas fa-user-clock text-warning me-2"></i> Attendance reminder</a></li>
-                            <li><a class="dropdown-item" href="#"><i class="fas fa-calendar-check text-success me-2"></i> Leave approved</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item text-center" href="#">View all notifications</a></li>
-                        </ul>
-                    </li>
-
                     <!-- User Dropdown -->
                     @if(session('user'))
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-user-circle me-1"></i>
                             {{ session('user')['name'] }}
+                            <small class="badge bg-light text-dark ms-1">{{ ucfirst(session('user')['role']) }}</small>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li><a class="dropdown-item" href="{{ route('profile') }}"><i class="fas fa-user me-2"></i> Profile</a></li>
@@ -287,14 +260,19 @@
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
         <div class="p-3">
-            <h5 class="text-center mb-4">
-                <i class="fas fa-building me-2 text-primary"></i>
-                Department
-            </h5>
+            @php
+                $user = session('user');
+                $role = $user['role'] ?? 'employee';
+                $roleName = ucfirst($role);
+                $userName = $user['name'] ?? 'User';
+            @endphp
 
-            <!-- Search Box -->
-            <div class="mb-3">
-                <input type="text" class="form-control" placeholder="Search..." id="searchSidebar">
+            <div class="text-center mb-4">
+                <div class="avatar bg-primary rounded-circle d-inline-flex align-items-center justify-content-center mb-2" style="width: 60px; height: 60px;">
+                    <i class="fas fa-user text-white fa-2x"></i>
+                </div>
+                <h6 class="mb-1">{{ $userName }}</h6>
+                <small class="text-muted">{{ $roleName }}</small>
             </div>
 
             <!-- Navigation Menu -->
@@ -305,12 +283,14 @@
                     </a>
                 </li>
 
-                <!-- Employee Management -->
+                <!-- Employee Management (Admin only) -->
+                @if($role === 'admin')
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('employees.*') ? 'active' : '' }}" href="{{ route('employees.index') }}">
-                        <i class="fas fa-users me-2"></i> Employees
+                        <i class="fas fa-users me-2"></i> Employee Management
                     </a>
                 </li>
+                @endif
 
                 <!-- Attendance -->
                 <li class="nav-item">
@@ -326,7 +306,8 @@
                     </a>
                 </li>
 
-                <!-- Reports Dropdown -->
+                <!-- Reports (Admin & Manager only) -->
+                @if(in_array($role, ['admin', 'manager']))
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {{ request()->routeIs('reports.*') ? 'active' : '' }}" href="#" role="button" data-bs-toggle="dropdown">
                         <i class="fas fa-chart-bar me-2"></i> Reports
@@ -338,6 +319,7 @@
                         <li><a class="dropdown-item" href="{{ route('reports.analytics') }}">Analytics</a></li>
                     </ul>
                 </li>
+                @endif
 
                 <!-- Settings -->
                 <li class="nav-item">
@@ -346,10 +328,10 @@
                     </a>
                 </li>
 
-                <!-- Admin Only -->
-                @if(session('user') && session('user')['role'] === 'admin')
+                <!-- Admin Only Section -->
+                @if($role === 'admin')
                 <li class="nav-item mt-3">
-                    <small class="text-muted ms-3">ADMIN</small>
+                    <small class="text-muted ms-3">ADMINISTRATION</small>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.*') ? 'active' : '' }}" href="{{ route('admin.dashboard') }}">
@@ -392,34 +374,6 @@
     <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
 
-    <!-- Select2 -->
-    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-
-    <!-- Flatpickr -->
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-
-    <!-- Firebase Configuration -->
-    <script>
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "{{ env('FIREBASE_API_KEY') }}",
-            authDomain: "{{ env('FIREBASE_AUTH_DOMAIN') }}",
-            databaseURL: "{{ env('FIREBASE_DATABASE_URL') }}",
-            projectId: "{{ env('FIREBASE_PROJECT_ID') }}",
-            storageBucket: "{{ env('FIREBASE_STORAGE_BUCKET') }}",
-            messagingSenderId: "{{ env('FIREBASE_MESSAGING_SENDER_ID') }}",
-            appId: "{{ env('FIREBASE_APP_ID') }}",
-            measurementId: "{{ env('FIREBASE_MEASUREMENT_ID') }}"
-        };
-
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-
-        // Get Firebase services
-        const auth = firebase.auth();
-        const database = firebase.database();
-    </script>
-
     <!-- Custom JavaScript -->
     <script>
         // CSRF Token setup for AJAX
@@ -430,18 +384,20 @@
         });
 
         // Sidebar Toggle
-        document.getElementById('sidebarToggle').addEventListener('click', function() {
-            document.getElementById('sidebar').classList.toggle('active');
-            document.getElementById('mainContent').classList.toggle('active');
+        document.getElementById('sidebarToggle')?.addEventListener('click', function() {
+            document.getElementById('sidebar')?.classList.toggle('active');
+            document.getElementById('mainContent')?.classList.toggle('active');
         });
 
         // Loading Spinner
         function showLoading() {
-            document.getElementById('loadingSpinner').style.display = 'flex';
+            const spinner = document.getElementById('loadingSpinner');
+            if (spinner) spinner.style.display = 'flex';
         }
 
         function hideLoading() {
-            document.getElementById('loadingSpinner').style.display = 'none';
+            const spinner = document.getElementById('loadingSpinner');
+            if (spinner) spinner.style.display = 'none';
         }
 
         // Auto-hide toasts after 5 seconds
@@ -449,12 +405,6 @@
             setTimeout(() => {
                 $('.toast').toast('hide');
             }, 5000);
-
-            // Initialize tooltips
-            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-                return new bootstrap.Tooltip(tooltipTriggerEl);
-            });
 
             // Initialize DataTables
             $('.data-table').DataTable({
@@ -465,48 +415,47 @@
                 }
             });
 
-            // Initialize Select2
-            $('.select2').select2({
-                theme: 'bootstrap-5'
-            });
+            // Fetch today's attendance stats - ONLY if elements exist
+            const todayPresentEl = document.getElementById('todayPresent');
+            const todayAbsentEl = document.getElementById('todayAbsent');
 
-            // Initialize date pickers
-            $('.datepicker').flatpickr({
-                dateFormat: "Y-m-d",
-                allowInput: true
-            });
-
-            // Fetch today's attendance stats
-            fetchTodayStats();
+            if (todayPresentEl && todayAbsentEl) {
+                fetchTodayStats();
+            }
         });
 
-        // Fetch today's attendance statistics
+        // Fetch today's attendance statistics - SAFE VERSION
         async function fetchTodayStats() {
             try {
-                const today = new Date().toISOString().split('T')[0];
-                const month = today.substring(0, 7);
+                const todayPresentEl = document.getElementById('todayPresent');
+                const todayAbsentEl = document.getElementById('todayAbsent');
 
-                // This is a placeholder - adjust based on your Firebase structure
-                const snapshot = await database.ref('attendances/' + month).once('value');
-                const data = snapshot.val();
-
-                let present = 0;
-                let absent = 0;
-
-                if (data) {
-                    Object.keys(data).forEach(employeeId => {
-                        if (data[employeeId][today]) {
-                            present++;
-                        } else {
-                            absent++;
-                        }
-                    });
+                if (!todayPresentEl || !todayAbsentEl) {
+                    return; // Skip if elements don't exist
                 }
 
-                document.getElementById('todayPresent').textContent = present;
-                document.getElementById('todayAbsent').textContent = absent;
+                // Try to fetch from API
+                const response = await fetch('/api/v1/stats');
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch stats');
+                }
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const stats = data.data;
+                    todayPresentEl.textContent = stats.present_today || 0;
+                    todayAbsentEl.textContent = stats.absent_today || 0;
+                }
             } catch (error) {
                 console.error('Error fetching stats:', error);
+                // Set default values
+                const todayPresentEl = document.getElementById('todayPresent');
+                const todayAbsentEl = document.getElementById('todayAbsent');
+
+                if (todayPresentEl) todayPresentEl.textContent = '0';
+                if (todayAbsentEl) todayAbsentEl.textContent = '0';
             }
         }
 
@@ -536,42 +485,24 @@
                 </div>
             `;
 
-            $('.toast-container').append(toastHtml);
-            $('.toast').toast('show');
+            const container = document.querySelector('.toast-container');
+            if (container) {
+                container.insertAdjacentHTML('beforeend', toastHtml);
+                const toast = container.lastElementChild;
+                const bsToast = new bootstrap.Toast(toast);
+                bsToast.show();
 
-            setTimeout(() => {
-                $('.toast').toast('hide');
-                setTimeout(() => $('.toast').remove(), 300);
-            }, 5000);
-        }
-
-        // Real-time updates for attendance
-        function listenToAttendanceUpdates() {
-            const today = new Date().toISOString().split('T')[0];
-            const month = today.substring(0, 7);
-
-            database.ref('attendances/' + month).on('value', (snapshot) => {
-                fetchTodayStats();
-
-                // Update UI if on attendance page
-                if (window.location.pathname.includes('attendance')) {
-                    // Trigger custom event for page-specific updates
-                    document.dispatchEvent(new CustomEvent('attendanceUpdated', {
-                        detail: { data: snapshot.val() }
-                    }));
-                }
-            });
-        }
-
-        // Start listening for real-time updates
-        if (firebase.auth().currentUser) {
-            listenToAttendanceUpdates();
+                setTimeout(() => {
+                    bsToast.hide();
+                    setTimeout(() => toast.remove(), 300);
+                }, 5000);
+            }
         }
 
         // Form validation helper
         function validateForm(formId) {
             const form = document.getElementById(formId);
-            if (!form.checkValidity()) {
+            if (form && !form.checkValidity()) {
                 form.classList.add('was-validated');
                 return false;
             }

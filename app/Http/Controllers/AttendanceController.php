@@ -20,10 +20,32 @@ class AttendanceController extends Controller
 
     public function dashboard()
     {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $employeeId = $user['employee_id'] ?? null;
+
         try {
-            $today = date('Y-m-d');
-            $attendanceData = $this->firebase->getTodayAttendance();
-            $allEmployees = $this->firebase->getCompanyEmployees();
+            if ($role === 'employee') {
+                // Employee can only see their own attendance
+                $today = date('Y-m-d');
+                $attendanceData = [];
+
+                // Get today's attendance for this employee only
+                $allAttendance = $this->firebase->getTodayAttendance();
+                if (isset($allAttendance[$employeeId])) {
+                    $attendanceData[$employeeId] = $allAttendance[$employeeId];
+                }
+
+                // Get employee data
+                $employee = $this->firebase->getEmployee($employeeId);
+                $allEmployees = $employee ? [$employeeId => $employee] : [];
+
+            } else {
+                // Admin/Manager can see all
+                $today = date('Y-m-d');
+                $attendanceData = $this->firebase->getTodayAttendance();
+                $allEmployees = $this->firebase->getCompanyEmployees();
+            }
 
             // Format for display
             $attendanceList = [];
@@ -49,7 +71,9 @@ class AttendanceController extends Controller
                 'allEmployees' => $allEmployees,
                 'totalEmployees' => count($allEmployees),
                 'presentCount' => count($attendanceList),
-                'today' => $today
+                'today' => $today,
+                'role' => $role,
+                'currentEmployeeId' => $employeeId
             ]);
 
         } catch (\Exception $e) {
@@ -59,6 +83,7 @@ class AttendanceController extends Controller
                 'totalEmployees' => 0,
                 'presentCount' => 0,
                 'today' => date('Y-m-d'),
+                'role' => $role,
                 'error' => $e->getMessage()
             ]);
         }
@@ -66,6 +91,19 @@ class AttendanceController extends Controller
 
     public function checkIn(Request $request)
     {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $employeeId = $user['employee_id'] ?? null;
+
+        // Only employees can check in/out
+        if ($role !== 'employee') {
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => 'Only employees can check in/out'], 403);
+            }
+            return redirect()->route('attendance.dashboard')
+                ->with('error', 'Only employees can check in/out');
+        }
+
         $validator = Validator::make($request->all(), [
             'employee_id' => 'required|string',
             'location' => 'required|string',
@@ -80,6 +118,14 @@ class AttendanceController extends Controller
                 ], 422);
             }
             return back()->withErrors($validator)->withInput();
+        }
+
+        // Verify employee can only check in themselves
+        if ($request->employee_id !== $employeeId) {
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => 'You can only check in yourself'], 403);
+            }
+            return back()->with('error', 'You can only check in yourself');
         }
 
         try {
@@ -141,6 +187,19 @@ class AttendanceController extends Controller
 
     public function checkOut(Request $request)
     {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $employeeId = $user['employee_id'] ?? null;
+
+        // Only employees can check in/out
+        if ($role !== 'employee') {
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => 'Only employees can check in/out'], 403);
+            }
+            return redirect()->route('attendance.dashboard')
+                ->with('error', 'Only employees can check in/out');
+        }
+
         $validator = Validator::make($request->all(), [
             'employee_id' => 'required|string'
         ]);
@@ -153,6 +212,14 @@ class AttendanceController extends Controller
                 ], 422);
             }
             return back()->withErrors($validator)->withInput();
+        }
+
+        // Verify employee can only check out themselves
+        if ($request->employee_id !== $employeeId) {
+            if ($request->expectsJson()) {
+                return response()->json(['success' => false, 'message' => 'You can only check out yourself'], 403);
+            }
+            return back()->with('error', 'You can only check out yourself');
         }
 
         try {
@@ -208,14 +275,15 @@ class AttendanceController extends Controller
 
     public function report(Request $request)
     {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $employeeId = $user['employee_id'] ?? null;
+
         $month = $request->get('month', date('Y-m'));
-        $employeeId = $request->get('employee_id');
 
         try {
-            $allEmployees = $this->firebase->getCompanyEmployees();
-
-            if ($employeeId) {
-                // Single employee report
+            if ($role === 'employee') {
+                // Employee can only see their own report
                 $attendance = $this->firebase->getEmployeeAttendance($employeeId, $month);
                 $employee = $this->firebase->getEmployee($employeeId);
 
@@ -224,38 +292,56 @@ class AttendanceController extends Controller
                         ->with('error', 'Employee not found');
                 }
 
-                return view('attendance.report-single', compact('attendance', 'employee', 'month'));
+                return view('attendance.report-single', compact('attendance', 'employee', 'month', 'role'));
+
             } else {
-                // All employees report
-                $monthAttendance = $this->firebase->getAttendanceByMonth($month);
+                // Admin/Manager can see all
+                $requestedEmployeeId = $request->get('employee_id');
+                $allEmployees = $this->firebase->getCompanyEmployees();
 
-                // Calculate statistics
-                $stats = [];
-                foreach ($allEmployees as $empId => $employee) {
-                    $presentDays = 0;
-                    $totalHours = 0;
+                if ($requestedEmployeeId) {
+                    // Single employee report
+                    $attendance = $this->firebase->getEmployeeAttendance($requestedEmployeeId, $month);
+                    $employee = $this->firebase->getEmployee($requestedEmployeeId);
 
-                    foreach ($monthAttendance as $date => $dayAttendance) {
-                        if (isset($dayAttendance[$empId])) {
-                            $presentDays++;
-                            $record = $dayAttendance[$empId];
-                            if (isset($record['hoursWorked'])) {
-                                $totalHours += $record['hoursWorked'];
-                            }
-                        }
+                    if (!$employee) {
+                        return redirect()->route('attendance.report')
+                            ->with('error', 'Employee not found');
                     }
 
-                    $stats[$empId] = [
-                        'employee' => $employee,
-                        'present_days' => $presentDays,
-                        'total_hours' => $totalHours,
-                        'attendance_rate' => count($monthAttendance) > 0
-                            ? round(($presentDays / count($monthAttendance)) * 100, 2)
-                            : 0
-                    ];
-                }
+                    return view('attendance.report-single', compact('attendance', 'employee', 'month', 'role'));
+                } else {
+                    // All employees report
+                    $monthAttendance = $this->firebase->getAttendanceByMonth($month);
 
-                return view('attendance.report-all', compact('stats', 'month', 'allEmployees'));
+                    // Calculate statistics
+                    $stats = [];
+                    foreach ($allEmployees as $empId => $employee) {
+                        $presentDays = 0;
+                        $totalHours = 0;
+
+                        foreach ($monthAttendance as $date => $dayAttendance) {
+                            if (isset($dayAttendance[$empId])) {
+                                $presentDays++;
+                                $record = $dayAttendance[$empId];
+                                if (isset($record['hoursWorked'])) {
+                                    $totalHours += $record['hoursWorked'];
+                                }
+                            }
+                        }
+
+                        $stats[$empId] = [
+                            'employee' => $employee,
+                            'present_days' => $presentDays,
+                            'total_hours' => $totalHours,
+                            'attendance_rate' => count($monthAttendance) > 0
+                                ? round(($presentDays / count($monthAttendance)) * 100, 2)
+                                : 0
+                        ];
+                    }
+
+                    return view('attendance.report-all', compact('stats', 'month', 'allEmployees', 'role'));
+                }
             }
 
         } catch (\Exception $e) {
@@ -263,6 +349,7 @@ class AttendanceController extends Controller
                 'stats' => [],
                 'month' => $month,
                 'allEmployees' => [],
+                'role' => $role,
                 'error' => $e->getMessage()
             ]);
         }
@@ -270,28 +357,42 @@ class AttendanceController extends Controller
 
     public function history(Request $request)
     {
-        $employeeId = $request->get('employee_id');
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $employeeId = $user['employee_id'] ?? null;
+
         $month = $request->get('month', date('Y-m'));
 
         try {
-            $allEmployees = $this->firebase->getCompanyEmployees();
-
-            if ($employeeId) {
+            if ($role === 'employee') {
+                // Employee can only see their own history
                 $attendance = $this->firebase->getEmployeeAttendance($employeeId, $month);
                 $employee = $this->firebase->getEmployee($employeeId);
 
-                return view('attendance.history-single', compact('attendance', 'employee', 'month'));
+                return view('attendance.history-single', compact('attendance', 'employee', 'month', 'role'));
+            }
+
+            // Admin/Manager can see filtered history
+            $requestedEmployeeId = $request->get('employee_id');
+            $allEmployees = $this->firebase->getCompanyEmployees();
+
+            if ($requestedEmployeeId) {
+                $attendance = $this->firebase->getEmployeeAttendance($requestedEmployeeId, $month);
+                $employee = $this->firebase->getEmployee($requestedEmployeeId);
+
+                return view('attendance.history-single', compact('attendance', 'employee', 'month', 'role'));
             }
 
             $monthAttendance = $this->firebase->getAttendanceByMonth($month);
 
-            return view('attendance.history', compact('monthAttendance', 'allEmployees', 'month'));
+            return view('attendance.history', compact('monthAttendance', 'allEmployees', 'month', 'role'));
 
         } catch (\Exception $e) {
             return view('attendance.history', [
                 'monthAttendance' => [],
                 'allEmployees' => [],
                 'month' => $month,
+                'role' => $role,
                 'error' => $e->getMessage()
             ]);
         }
@@ -299,6 +400,15 @@ class AttendanceController extends Controller
 
     public function manualEntry(Request $request)
     {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+
+        // Only admin can do manual entry
+        if ($role !== 'admin') {
+            return redirect()->route('attendance.dashboard')
+                ->with('error', 'Only administrators can do manual entry');
+        }
+
         $request->validate([
             'employee_id' => 'required|string',
             'date' => 'required|date',
@@ -342,26 +452,56 @@ class AttendanceController extends Controller
 
     public function apiToday(): JsonResponse
     {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $employeeId = $user['employee_id'] ?? null;
+
         try {
-            $attendance = $this->firebase->getTodayAttendance();
-            $allEmployees = $this->firebase->getCompanyEmployees();
+            if ($role === 'employee') {
+                // Employee can only see their own attendance
+                $attendance = $this->firebase->getTodayAttendance();
+                $employeeAttendance = isset($attendance[$employeeId]) ? [$employeeId => $attendance[$employeeId]] : [];
 
-            $present = count($attendance);
-            $total = count($allEmployees);
-            $absent = $total - $present;
+                $employee = $this->firebase->getEmployee($employeeId);
+                $total = 1;
+                $present = isset($attendance[$employeeId]) ? 1 : 0;
+                $absent = $total - $present;
 
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'date' => date('Y-m-d'),
-                    'present' => $present,
-                    'absent' => $absent,
-                    'total' => $total,
-                    'attendance_rate' => $total > 0 ? round(($present / $total) * 100, 2) : 0,
-                    'attendance_list' => $attendance
-                ],
-                'message' => 'Today\'s attendance retrieved'
-            ]);
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'date' => date('Y-m-d'),
+                        'present' => $present,
+                        'absent' => $absent,
+                        'total' => $total,
+                        'attendance_rate' => $total > 0 ? round(($present / $total) * 100, 2) : 0,
+                        'attendance_list' => $employeeAttendance,
+                        'employee_data' => $employee
+                    ],
+                    'message' => 'Today\'s attendance retrieved'
+                ]);
+            } else {
+                // Admin/Manager can see all
+                $attendance = $this->firebase->getTodayAttendance();
+                $allEmployees = $this->firebase->getCompanyEmployees();
+
+                $present = count($attendance);
+                $total = count($allEmployees);
+                $absent = $total - $present;
+
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'date' => date('Y-m-d'),
+                        'present' => $present,
+                        'absent' => $absent,
+                        'total' => $total,
+                        'attendance_rate' => $total > 0 ? round(($present / $total) * 100, 2) : 0,
+                        'attendance_list' => $attendance
+                    ],
+                    'message' => 'Today\'s attendance retrieved'
+                ]);
+            }
 
         } catch (\Exception $e) {
             return response()->json([
@@ -374,6 +514,18 @@ class AttendanceController extends Controller
 
     public function apiEmployeeAttendance($employeeId): JsonResponse
     {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+        $currentEmployeeId = $user['employee_id'] ?? null;
+
+        // Check if employee trying to access other employee's data
+        if ($role === 'employee' && $employeeId !== $currentEmployeeId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only view your own attendance'
+            ], 403);
+        }
+
         try {
             $employee = $this->firebase->getEmployee($employeeId);
 

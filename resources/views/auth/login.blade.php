@@ -47,11 +47,11 @@
             @csrf
             <div class="mb-3">
                 <label class="form-label">Email Address</label>
-                <input type="email" class="form-control" name="email" value="{{ old('email', 'admin@example.com') }}" required>
+                <input type="email" class="form-control" name="email" value="{{ old('email') }}" required>
             </div>
             <div class="mb-3">
                 <label class="form-label">Password</label>
-                <input type="password" class="form-control" name="password" value="password123" required>
+                <input type="password" class="form-control" name="password" value="" required>
             </div>
             <div class="mb-3 form-check">
                 <input type="checkbox" class="form-check-input" id="remember">
@@ -62,9 +62,9 @@
 
         <div class="mt-3 text-center">
             <p class="text-muted mb-2">Demo Credentials:</p>
-            <p class="mb-1"><strong>Admin:</strong> admin@example.com / password123</p>
-            <p class="mb-1"><strong>Manager:</strong> manager@example.com / password123</p>
-            <p class="mb-0"><strong>Employee:</strong> employee@example.com / password123</p>
+            <p class="mb-1"><strong>Admin:</strong> admin@company.com / password123</p>
+            <p class="mb-1"><strong>Manager:</strong> manager@company.com / password123</p>
+            <p class="mb-0"><strong>Employee:</strong> employee@company.com / password123</p>
         </div>
     </div>
 </body>

@@ -4,8 +4,12 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\LeaveController;
 
 Route::prefix('v1')->group(function () {
+    // Dashboard API
+    Route::get('/stats', [DashboardController::class, 'apiStats']);
+
     // Employee API
     Route::get('/employees', [EmployeeController::class, 'apiIndex']);
     Route::get('/employees/{id}', [EmployeeController::class, 'apiShow']);
@@ -13,12 +17,7 @@ Route::prefix('v1')->group(function () {
 
     // Attendance API
     Route::get('/attendance/today', [AttendanceController::class, 'apiToday']);
-    Route::get('/attendance/monthly/{month?}', [AttendanceController::class, 'apiMonthly']);
-    Route::post('/attendance/check-in', [AttendanceController::class, 'apiMobileCheckIn']);
-    Route::post('/attendance/check-out', [AttendanceController::class, 'apiMobileCheckOut']);
 
-    // Dashboard API
-    Route::get('/stats', [DashboardController::class, 'apiStats']);
-    Route::get('/activities', [DashboardController::class, 'apiActivities']);
-
+    // Leave API
+    Route::get('/leaves/employee/{employeeId}', [LeaveController::class, 'apiEmployeeLeaves']);
 });
