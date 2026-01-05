@@ -19,109 +19,83 @@ class ReportController extends Controller
     /**
      * Laporan Absensi Bulanan
      */
+    // Attendance report - VERSI IMPROVED
     public function attendance(Request $request)
     {
-        try {
-            // Ambil bulan dan tahun dari request, default: bulan & tahun sekarang
-            $selectedMonth = (int) $request->get('month', now()->month);
-            $selectedYear  = (int) $request->get('year', now()->year);
+        $month = $request->get('month', date('Y-m')); // contoh: 2026-01
+        $department = $request->get('department');
+        $employeeId = $request->get('employee_id'); // filter per karyawan
 
-            $yearMonth = sprintf('%04d-%02d', $selectedYear, $selectedMonth); // Format: 2026-01
+        $db = $this->firebase->getDatabase();
 
-            // Ambil data absensi untuk bulan tersebut dari Firebase
-            $rawAttendance = $this->firebase->getAttendanceByMonth($yearMonth); // method ini sudah ada di FirebaseService
+        // Ambil data employees
+        $employeesRef = $db->getReference('employees')->getValue() ?: [];
 
-            // Ambil semua karyawan perusahaan
-            $employees = $this->firebase->getCompanyEmployees();
+        // Ambil data attendance bulan tersebut
+        $attendanceRef = $db->getReference("attendances/$month")->getValue() ?: [];
 
-            // Proses data untuk laporan
-            $attendanceReport = [];
-            $summary = [
-                'totalEmployees' => count($employees),
-                'present'        => 0,
-                'onLeave'        => 0,
-                'absent'         => 0,
-                'late'           => 0,
+        // Filter employees berdasarkan department
+        $employees = $employeesRef;
+        if ($department) {
+            $employees = array_filter($employees, fn($emp) => ($emp['department'] ?? '') === $department);
+        }
+
+        $reportData = [];
+
+        foreach ($employees as $empId => $emp) {
+            // Kalau ada filter employee_id, skip yang bukan target
+            if ($employeeId && $empId !== $employeeId) {
+                continue;
+            }
+
+            $days = $attendanceRef[$empId] ?? [];
+            $details = []; // untuk detail harian di view
+            $stats = [
+                'present' => 0,
+                'late' => 0,
+                'leave' => 0,
+                'sick' => 0,
+                'permission' => 0,
+                'absent' => 0,
             ];
 
-            foreach ($employees as $empId => $employee) {
-                $record = [
-                    'id'         => $empId,
-                    'name'       => $employee['name'] ?? 'Unknown',
-                    'department' => $employee['department'] ?? '-',
-                    'present'    => 0,
-                    'on_leave'   => 0,
-                    'absent'     => 0,
-                    'late'       => 0,
-                    'overtime'   => 0,
+            foreach ($days as $date => $day) {
+                $status = $day['status'] ?? 'absent'; // fallback absent
+                $stats[$status] = ($stats[$status] ?? 0) + 1;
+
+                $details[] = [
+                    'date' => $date, // format YYYY-MM-DD
+                    'status' => ucfirst(str_replace('_', ' ', $status)), // Present, Late, Leave, dll
+                    'reason' => $day['reason'] ?? '-',
+                    'clock_in' => $day['clock_in'] ?? '-',
+                    'clock_out' => $day['clock_out'] ?? '-',
                 ];
-
-                $empAttendance = $rawAttendance ?? [];
-
-                foreach ($empAttendance as $date => $dayData) {
-                    if (isset($dayData[$empId])) {
-                        $status = $dayData[$empId]['status'] ?? 'absent';
-
-                        switch ($status) {
-                            case 'present':
-                                $record['present']++;
-                                $summary['present']++;
-                                $record['overtime'] += $dayData[$empId]['overtime'] ?? 0;
-                                break;
-                            case 'late':
-                                $record['late']++;
-                                $summary['late']++;
-                                break;
-                            case 'leave':
-                            case 'sick':
-                            case 'on_leave':
-                                $record['on_leave']++;
-                                $summary['onLeave']++;
-                                break;
-                            default:
-                                $record['absent']++;
-                                $summary['absent']++;
-                        }
-                    } else {
-                        // Jika tidak ada record di hari itu → dianggap absent
-                        $record['absent']++;
-                        $summary['absent']++;
-                    }
-                }
-
-                $attendanceReport[] = $record;
             }
 
-            // Urutkan berdasarkan nama karyawan
-            usort($attendanceReport, fn($a, $b) => strcmp($a['name'], $b['name']));
+            $totalDays = count($days);
+            $attendedDays = ($stats['present'] ?? 0) + ($stats['late'] ?? 0); // hadir + telat = masuk
+            $attendanceRate = $totalDays > 0 ? round(($attendedDays / $totalDays) * 100, 2) : 0;
 
-            // Export PDF jika diminta
-            if ($request->get('export') === 'pdf') {
-                $pdf = PDF::loadView('reports.attendance-pdf', [
-                    'attendanceReport' => $attendanceReport,
-                    'summary'          => $summary,
-                    'monthName'        => Carbon::create()->month($selectedMonth)->format('F'),
-                    'year'             => $selectedYear,
-                ]);
-                return $pdf->download("laporan-absensi-{$selectedYear}-{$selectedMonth}.pdf");
-            }
-
-            return view('reports.attendance', compact(
-                'attendanceReport',
-                'summary',
-                'selectedMonth',
-                'selectedYear'
-            ));
-        } catch (\Exception $e) {
-            \Log::error('Report Attendance Error: ' . $e->getMessage());
-
-            return view('reports.attendance', [
-                'attendanceReport' => [],
-                'summary'          => ['totalEmployees' => 0, 'present' => 0, 'onLeave' => 0, 'absent' => 0, 'late' => 0],
-                'selectedMonth'    => now()->month,
-                'selectedYear'     => now()->year,
-            ])->with('error', 'Gagal memuat laporan absensi.');
+            $reportData[$empId] = [
+                'employee' => $emp,
+                'stats' => $stats,
+                'total_days' => $totalDays,
+                'attendance_rate' => $attendanceRate,
+                'details' => $details, // ini yang dipakai di collapse table
+            ];
         }
+
+        // Urutkan reportData berdasarkan nama karyawan (opsional, biar rapi)
+        uasort($reportData, fn($a, $b) => $a['employee']['name'] <=> $b['employee']['name']);
+
+        // Export PDF
+        if ($request->get('export') == 'pdf') {
+            $pdf = PDF::loadView('reports.attendance-pdf', compact('reportData', 'month', 'department'));
+            return $pdf->download("attendance-report-{$month}.pdf");
+        }
+
+        // Return view
+        return view('reports.attendance', compact('reportData', 'month', 'department', 'employeeId'));
     }
 
     /**
