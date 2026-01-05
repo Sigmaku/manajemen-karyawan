@@ -85,7 +85,6 @@
                         }
                     @endphp
 
-                    <!-- Di bagian Today's Status Card -->
                     @if($todayAttendance && isset($todayAttendance['checkIn']))
                     <div class="row align-items-center">
                         <div class="col-md-8">
@@ -111,12 +110,9 @@
                         </div>
                         <div class="col-md-4 text-end">
                             @if(!isset($todayAttendance['checkOut']))
-                            <form action="{{ route('attendance.check-out') }}" method="POST">
-                                @csrf
-                                <button type="submit" class="btn btn-danger btn-lg">
-                                    <i class="fas fa-sign-out-alt me-2"></i>Check Out
-                                </button>
-                            </form>
+                            <button type="button" class="btn btn-danger btn-lg" data-bs-toggle="modal" data-bs-target="#checkOutModal">
+                                <i class="fas fa-sign-out-alt me-2"></i>Check Out
+                            </button>
                             @else
                             <button class="btn btn-secondary btn-lg" disabled>
                                 <i class="fas fa-check me-2"></i>Completed
@@ -251,6 +247,39 @@
     </div>
 </div>
 
+<!-- Check Out Confirmation Modal -->
+<div class="modal fade" id="checkOutModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h5 class="modal-title text-danger">
+                    <i class="fas fa-sign-out-alt me-2"></i>Confirm Check Out
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <i class="fas fa-clock fa-4x text-warning mb-4"></i>
+                <h6>Are you sure you want to check out now?</h6>
+                <p class="text-muted">
+                    Check-in time: <strong>{{ $todayAttendance['checkIn'] ?? '-' }}</strong><br>
+                    Current time: <strong>{{ date('H:i:s') }}</strong>
+                </p>
+                <p class="text-muted mb-0">
+                    Once checked out, you cannot check in again today.
+                </p>
+            </div>
+            <div class="modal-footer border-0 justify-content-center">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-2"></i>Cancel
+                </button>
+                <button type="button" class="btn btn-danger" onclick="submitCheckOut()">
+                    <i class="fas fa-sign-out-alt me-2"></i>Yes, Check Out
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @push('scripts')
 <script>
     // Check In Function
@@ -258,21 +287,19 @@
         const form = document.getElementById('checkInForm');
         const formData = new FormData(form);
 
-fetch('{{ route("attendance.check-in") }}', {
-    method: 'POST',
-    body: formData,
-    headers: {
-        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-        'Accept': 'application/json' // 🔥 INI PENTING
-    }
-})
-
+        fetch('{{ route("attendance.check-in") }}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                'Accept': 'application/json'
+            }
+        })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
                 $('#checkInModal').modal('hide');
                 showToast('success', data.message);
-                // Refresh page setelah 1 detik
                 setTimeout(() => location.reload(), 1000);
             } else {
                 showToast('error', data.message || 'Check-in failed');
@@ -284,38 +311,46 @@ fetch('{{ route("attendance.check-in") }}', {
         });
     }
 
-    // Check Out Function
-    function checkOut() {
-        const employeeId = '{{ $employeeId }}';
+    // Check Out Function with Confirmation Modal
+// Check Out Function with Confirmation Modal (FIXED VERSION)
+function submitCheckOut() {
+    const employeeId = '{{ $employeeId }}';
 
-        if (!confirm('Are you sure you want to check out?')) {
-            return;
+    // Buat FormData agar CSRF otomatis terkirim dengan benar
+    const formData = new FormData();
+    formData.append('employee_id', employeeId);
+    formData.append('_token', '{{ csrf_token() }}'); // penting!
+
+    fetch('{{ route("attendance.check-out") }}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'Accept': 'application/json',
+            // JANGAN set Content-Type manually saat pakai FormData!
+            // Browser akan otomatis set multipart/form-data + boundary
         }
-
-fetch('{{ route("attendance.check-out") }}', {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-        'Accept': 'application/json' // 🔥 INI PENTING
-    },
-    body: JSON.stringify({ employee_id: employeeId })
-})
-
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showToast('success', data.message);
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showToast('error', data.message || 'Check-out failed');
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showToast('error', 'Network error. Please try again.');
-        });
-    }
+    })
+    .then(response => {
+        if (!response.ok) {
+            // Jika status bukan 2xx, lempar error agar masuk ke catch
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            $('#checkOutModal').modal('hide');
+            showToast('success', data.message || 'Successfully checked out!');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast('error', data.message || 'Check-out failed');
+        }
+    })
+    .catch(error => {
+        console.error('Check-out error:', error);
+        showToast('error', 'Failed to check out. Please try again.');
+    });
+}
 
     // Toast notification function
     function showToast(type, message) {
@@ -331,18 +366,22 @@ fetch('{{ route("attendance.check-out") }}', {
             </div>
         `;
 
-        const container = document.querySelector('.toast-container');
-        if (container) {
-            container.insertAdjacentHTML('beforeend', toastHtml);
-            const toast = container.lastElementChild;
-            const bsToast = new bootstrap.Toast(toast);
-            bsToast.show();
-
-            setTimeout(() => {
-                bsToast.hide();
-                setTimeout(() => toast.remove(), 300);
-            }, 5000);
+        let container = document.querySelector('.toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            document.body.appendChild(container);
         }
+
+        container.insertAdjacentHTML('beforeend', toastHtml);
+        const toastEl = container.lastElementChild;
+        const bsToast = new bootstrap.Toast(toastEl);
+        bsToast.show();
+
+        setTimeout(() => {
+            bsToast.hide();
+            setTimeout(() => toastEl.remove(), 300);
+        }, 5000);
     }
 </script>
 @endpush
