@@ -299,8 +299,8 @@
                     </a>
                 </li>
 
-                <!-- Leave Management -->
-                <li class="nav-item">
+<!-- Leave Management -->
+<li class="nav-item">
     @if($role === 'employee')
         <a class="nav-link {{ request()->routeIs('leaves.my') || request()->routeIs('leaves.show') ? 'active' : '' }}"
            href="{{ route('leaves.my') }}">
@@ -328,13 +328,6 @@
                     </ul>
                 </li>
                 @endif
-
-                <!-- Settings -->
-                <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('settings.*') ? 'active' : '' }}" href="{{ route('settings.index') }}">
-                        <i class="fas fa-cog me-2"></i> Settings
-                    </a>
-                </li>
 
                 <!-- Admin Only Section -->
                 @if($role === 'admin')

@@ -142,60 +142,7 @@
                         <a href="{{ route('attendance.dashboard') }}" class="btn btn-info">
                             <i class="fas fa-clock me-2"></i>Attendance
                         </a>
-                        <a href="{{ route('leaves.index') }}" class="btn btn-warning">
-                            <i class="fas fa-calendar-alt me-2"></i>Leave Requests
-                        </a>
-                        <a href="{{ route('admin.dashboard') }}" class="btn btn-dark">
-                            <i class="fas fa-user-shield me-2"></i>Admin Panel
-                        </a>
                     </div>
-                </div>
-            </div>
-
-            <!-- Recent Leave Requests -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Recent Leave Requests</h5>
-                </div>
-                <div class="card-body">
-                    @forelse($recentLeaves as $leaveId => $leave)
-                    <div class="mb-3 pb-3 border-bottom">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <strong>
-                                    @php
-                                        $employeeId = $leave['employeeId'] ?? '';
-                                        $employee = $employees[$employeeId] ?? [];
-                                    @endphp
-                                    {{ $employee['name'] ?? 'Unknown' }}
-                                </strong>
-                                <div>
-                                    <small class="text-muted">
-                                        {{ $leave['type'] ?? 'Annual' }} Leave
-                                    </small>
-                                </div>
-                            </div>
-                            <span class="badge bg-{{ $leave['status'] == 'pending' ? 'warning' : ($leave['status'] == 'approved' ? 'success' : 'danger') }}">
-                                {{ ucfirst($leave['status'] ?? 'pending') }}
-                            </span>
-                        </div>
-                        <small class="text-muted">
-                            {{ date('M d', strtotime($leave['startDate'] ?? '')) }} -
-                            {{ date('M d', strtotime($leave['endDate'] ?? '')) }}
-                        </small>
-                    </div>
-                    @empty
-                    <div class="text-center py-3">
-                        <i class="fas fa-check-circle fa-2x text-success mb-3"></i>
-                        <p>No recent leave requests</p>
-                    </div>
-                    @endforelse
-
-                    @if(count($recentLeaves) > 0)
-                    <a href="{{ route('leaves.index') }}" class="btn btn-sm btn-outline-primary w-100">
-                        View All Requests
-                    </a>
-                    @endif
                 </div>
             </div>
 

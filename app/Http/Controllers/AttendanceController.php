@@ -97,12 +97,12 @@ class AttendanceController extends Controller
 
         // Only employees can check in/out
         if ($role !== 'employee') {
-            if ($request->expectsJson()) {
-                return response()->json(['success' => false, 'message' => 'Only employees can check in/out'], 403);
-            }
             return redirect()->route('attendance.dashboard')
                 ->with('error', 'Only employees can check in/out');
         }
+
+        // Auto use logged in employee ID
+        $request->merge(['employee_id' => $employeeId]);
 
         $validator = Validator::make($request->all(), [
             'employee_id' => 'required|string',
@@ -111,77 +111,41 @@ class AttendanceController extends Controller
         ]);
 
         if ($validator->fails()) {
-            if ($request->expectsJson()) {
-                return response()->json([
-                    'success' => false,
-                    'errors' => $validator->errors()
-                ], 422);
-            }
             return back()->withErrors($validator)->withInput();
         }
 
-        // Verify employee can only check in themselves
-        if ($request->employee_id !== $employeeId) {
-            if ($request->expectsJson()) {
-                return response()->json(['success' => false, 'message' => 'You can only check in yourself'], 403);
-            }
-            return back()->with('error', 'You can only check in yourself');
-        }
-
         try {
-            $employee = $this->firebase->getEmployee($request->employee_id);
+            $employee = $this->firebase->getEmployee($employeeId);
 
             if (!$employee) {
-                $message = 'Employee not found';
-                if ($request->expectsJson()) {
-                    return response()->json(['success' => false, 'message' => $message], 404);
-                }
-                return back()->with('error', $message);
+                return back()->with('error', 'Employee not found');
             }
 
             // Check if already checked in today
             $todayAttendance = $this->firebase->getTodayAttendance();
-            if (isset($todayAttendance[$request->employee_id])) {
-                $message = 'Already checked in today';
-                if ($request->expectsJson()) {
-                    return response()->json(['success' => false, 'message' => $message], 400);
-                }
-                return back()->with('error', $message);
+            if (isset($todayAttendance[$employeeId])) {
+                return back()->with('error', 'Already checked in today');
             }
 
             $attendanceData = [
-                'location' => $request->location,
+                'location' => $request->location ?? 'Office',
                 'notes' => $request->notes ?? ''
             ];
 
-            $record = $this->firebase->recordCheckIn($request->employee_id, $attendanceData);
+            $record = $this->firebase->recordCheckIn($employeeId, $attendanceData);
 
-            $response = [
-                'success' => true,
-                'message' => 'Check-in successful!',
-                'data' => [
-                    'employee_id' => $request->employee_id,
+            return redirect()->route('attendance.dashboard')
+                ->with('success', 'Check-in recorded successfully!')
+                ->with('checkin_data', [
+                    'employee_id' => $employeeId,
                     'employee_name' => $employee['name'] ?? 'Unknown',
                     'check_in' => $record['checkIn'],
                     'location' => $record['location'],
                     'time' => $record['checkIn']
-                ]
-            ];
-
-            if ($request->expectsJson()) {
-                return response()->json($response);
-            }
-
-            return redirect()->route('attendance.dashboard')
-                ->with('success', 'Check-in recorded successfully!')
-                ->with('checkin_data', $response['data']);
+                ]);
 
         } catch (\Exception $e) {
-            $error = 'Check-in failed: ' . $e->getMessage();
-            if ($request->expectsJson()) {
-                return response()->json(['success' => false, 'message' => $error], 500);
-            }
-            return back()->with('error', $error);
+            return back()->with('error', 'Check-in failed: ' . $e->getMessage());
         }
     }
 
@@ -193,83 +157,47 @@ class AttendanceController extends Controller
 
         // Only employees can check in/out
         if ($role !== 'employee') {
-            if ($request->expectsJson()) {
-                return response()->json(['success' => false, 'message' => 'Only employees can check in/out'], 403);
-            }
             return redirect()->route('attendance.dashboard')
                 ->with('error', 'Only employees can check in/out');
         }
+
+        // Auto use logged in employee ID
+        $request->merge(['employee_id' => $employeeId]);
 
         $validator = Validator::make($request->all(), [
             'employee_id' => 'required|string'
         ]);
 
         if ($validator->fails()) {
-            if ($request->expectsJson()) {
-                return response()->json([
-                    'success' => false,
-                    'errors' => $validator->errors()
-                ], 422);
-            }
             return back()->withErrors($validator)->withInput();
         }
 
-        // Verify employee can only check out themselves
-        if ($request->employee_id !== $employeeId) {
-            if ($request->expectsJson()) {
-                return response()->json(['success' => false, 'message' => 'You can only check out yourself'], 403);
-            }
-            return back()->with('error', 'You can only check out yourself');
-        }
-
         try {
-            $employee = $this->firebase->getEmployee($request->employee_id);
+            $employee = $this->firebase->getEmployee($employeeId);
 
             if (!$employee) {
-                $message = 'Employee not found';
-                if ($request->expectsJson()) {
-                    return response()->json(['success' => false, 'message' => $message], 404);
-                }
-                return back()->with('error', $message);
+                return back()->with('error', 'Employee not found');
             }
 
-            $record = $this->firebase->recordCheckOut($request->employee_id);
+            $record = $this->firebase->recordCheckOut($employeeId);
 
             if (!$record) {
-                $message = 'No check-in record found for today';
-                if ($request->expectsJson()) {
-                    return response()->json(['success' => false, 'message' => $message], 404);
-                }
-                return back()->with('error', $message);
+                return back()->with('error', 'No check-in record found for today');
             }
 
-            $response = [
-                'success' => true,
-                'message' => 'Check-out successful!',
-                'data' => [
-                    'employee_id' => $request->employee_id,
+            return redirect()->route('attendance.dashboard')
+                ->with('success', 'Check-out recorded successfully!')
+                ->with('checkout_data', [
+                    'employee_id' => $employeeId,
                     'employee_name' => $employee['name'] ?? 'Unknown',
                     'check_out' => $record['checkOut'],
                     'hours_worked' => $record['hoursWorked'] ?? 0,
                     'overtime' => $record['overtime'] ?? 0,
                     'time' => $record['checkOut']
-                ]
-            ];
-
-            if ($request->expectsJson()) {
-                return response()->json($response);
-            }
-
-            return redirect()->route('attendance.dashboard')
-                ->with('success', 'Check-out recorded successfully!')
-                ->with('checkout_data', $response['data']);
+                ]);
 
         } catch (\Exception $e) {
-            $error = 'Check-out failed: ' . $e->getMessage();
-            if ($request->expectsJson()) {
-                return response()->json(['success' => false, 'message' => $error], 500);
-            }
-            return back()->with('error', $error);
+            return back()->with('error', 'Check-out failed: ' . $e->getMessage());
         }
     }
 
