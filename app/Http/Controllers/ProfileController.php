@@ -20,10 +20,10 @@ class ProfileController extends Controller
 
         if (isset($user['employee_id'])) {
             $employee = $this->firebase->getEmployee($user['employee_id']);
-            return view('profile.index', compact('user', 'employee'));
+            return view('profile.show', compact('user', 'employee'));
         }
 
-        return view('profile.index', compact('user'));
+        return view('profile.show', compact('user'));
     }
 
     public function update(Request $request)

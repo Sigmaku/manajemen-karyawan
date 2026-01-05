@@ -258,13 +258,15 @@
         const form = document.getElementById('checkInForm');
         const formData = new FormData(form);
 
-        fetch('{{ route("attendance.check-in") }}', {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-CSRF-TOKEN': '{{ csrf_token() }}'
-            }
-        })
+fetch('{{ route("attendance.check-in") }}', {
+    method: 'POST',
+    body: formData,
+    headers: {
+        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+        'Accept': 'application/json' // 🔥 INI PENTING
+    }
+})
+
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -290,14 +292,16 @@
             return;
         }
 
-        fetch('{{ route("attendance.check-out") }}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': '{{ csrf_token() }}'
-            },
-            body: JSON.stringify({ employee_id: employeeId })
-        })
+fetch('{{ route("attendance.check-out") }}', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+        'Accept': 'application/json' // 🔥 INI PENTING
+    },
+    body: JSON.stringify({ employee_id: employeeId })
+})
+
         .then(response => response.json())
         .then(data => {
             if (data.success) {
