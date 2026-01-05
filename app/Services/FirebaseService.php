@@ -58,6 +58,61 @@ class FirebaseService
         return $this->companyId;
     }
 
+    // ==================== AUTH METHODS ====================
+
+    /**
+     * Create authentication user and database record
+     */
+    public function createAuthUser($email, $password, $userData)
+    {
+        try {
+            // 1. Create user in Firebase Authentication
+            $authUser = $this->auth->createUser([
+                'email' => $email,
+                'password' => $password,
+                'displayName' => $userData['name'],
+                'emailVerified' => true
+            ]);
+
+            $uid = $authUser->uid;
+
+            // 2. Prepare user data for database
+            $dbUserData = [
+                'uid' => $uid,
+                'email' => $email,
+                'name' => $userData['name'],
+                'role' => 'employee',
+                'employee_id' => $userData['employee_id'],
+                'companyId' => $this->companyId,
+                'created_at' => now()->toISOString()
+            ];
+
+            // 3. Save to users collection
+            $this->database->getReference('users/' . $uid)->set($dbUserData);
+
+            Log::info("Auth user created: $uid for employee: " . $userData['employee_id']);
+
+            return $uid;
+
+        } catch (\Exception $e) {
+            Log::error('Create auth user error: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Generate random password
+     */
+    public function generateRandomPassword($length = 8)
+    {
+        $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*';
+        $password = '';
+        for ($i = 0; $i < $length; $i++) {
+            $password .= $chars[random_int(0, strlen($chars) - 1)];
+        }
+        return $password;
+    }
+
     // ==================== EMPLOYEE METHODS ====================
 
     public function getAllEmployees()
@@ -126,6 +181,7 @@ class FirebaseService
                 'position' => $data['position'],
                 'joinDate' => $data['hire_date'] ?? date('Y-m-d'),
                 'address' => $data['address'] ?? '',
+                'salary' => $data['salary'] ?? 0,
                 'status' => 'active',
                 'role' => 'employee',
                 'createdAt' => now()->toISOString(),
@@ -172,12 +228,61 @@ class FirebaseService
     public function deleteEmployee($employeeId)
     {
         try {
+            // First get employee data to check if there's a user account
+            $employee = $this->getEmployee($employeeId);
+
+            if ($employee && isset($employee['uid'])) {
+                try {
+                    // Delete from Firebase Auth
+                    $this->auth->deleteUser($employee['uid']);
+
+                    // Delete from users collection
+                    $this->database->getReference('users/' . $employee['uid'])->remove();
+
+                    Log::info("Auth user deleted: " . $employee['uid']);
+                } catch (\Exception $authError) {
+                    Log::warning("Failed to delete auth user: " . $authError->getMessage());
+                }
+            }
+
+            // Delete employee record
             $this->database->getReference('employees/' . $employeeId)->remove();
+
             Log::info("Employee deleted: $employeeId");
             return true;
+
         } catch (\Exception $e) {
             Log::error('Firebase deleteEmployee error: ' . $e->getMessage());
             throw $e;
+        }
+    }
+
+    // ==================== USER METHODS ====================
+
+    public function getAllUsers()
+    {
+        try {
+            $users = $this->database->getReference('users')->getValue();
+            return $users ?: [];
+        } catch (\Exception $e) {
+            Log::error('Firebase getAllUsers error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    public function getUserByEmail($email)
+    {
+        try {
+            $users = $this->getAllUsers();
+            foreach ($users as $uid => $user) {
+                if (isset($user['email']) && $user['email'] === $email) {
+                    return $user;
+                }
+            }
+            return null;
+        } catch (\Exception $e) {
+            Log::error('Firebase getUserByEmail error: ' . $e->getMessage());
+            return null;
         }
     }
 
@@ -505,7 +610,8 @@ class FirebaseService
         }
     }
 
-    // ====== METHOD AUUTENTIKASi ======// Tambahkan method ini di FirebaseService.php
+    // ==================== AUTHENTICATION METHODS ====================
+
     public function authenticateUser($email, $password)
     {
         try {
@@ -533,23 +639,57 @@ class FirebaseService
         }
     }
 
-    // Tambahkan method ini di class FirebaseService
-
-    public function getAllUsers()
-    {
-        try {
-            $users = $this->database->getReference('users')->getValue();
-            return $users ?: [];
-        } catch (\Exception $e) {
-            Log::error('Firebase getAllUsers error: ' . $e->getMessage());
-            return [];
-        }
-    }
-
     public function createUser($uid, $userData)
     {
         $this->database->getReference('users/' . $uid)->set($userData);
         return true;
     }
 
+    // ==================== UTILITY METHODS ====================
+
+    /**
+     * Reset user password
+     */
+    public function resetUserPassword($uid)
+    {
+        try {
+            $newPassword = $this->generateRandomPassword();
+
+            // Update password in Firebase Auth
+            $this->auth->changeUserPassword($uid, $newPassword);
+
+            Log::info("Password reset for user: $uid");
+
+            return $newPassword;
+
+        } catch (\Exception $e) {
+            Log::error('Reset password error: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Update user email
+     */
+    public function updateUserEmail($uid, $newEmail)
+    {
+        try {
+            // Update in Firebase Auth
+            $this->auth->changeUserEmail($uid, $newEmail);
+
+            // Update in database
+            $this->database->getReference('users/' . $uid)->update([
+                'email' => $newEmail,
+                'updated_at' => now()->toISOString()
+            ]);
+
+            Log::info("Email updated for user: $uid");
+
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error('Update email error: ' . $e->getMessage());
+            throw $e;
+        }
+    }
 }

@@ -299,13 +299,6 @@
                     </a>
                 </li>
 
-                <!-- Leave Management -->
-                <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('leaves.*') ? 'active' : '' }}" href="{{ route('leaves.index') }}">
-                        <i class="fas fa-calendar-alt me-2"></i> Leave Management
-                    </a>
-                </li>
-
                 <!-- Reports (Admin & Manager only) -->
                 @if(in_array($role, ['admin', 'manager']))
                 <li class="nav-item dropdown">
@@ -320,13 +313,6 @@
                     </ul>
                 </li>
                 @endif
-
-                <!-- Settings -->
-                <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('settings.*') ? 'active' : '' }}" href="{{ route('settings.index') }}">
-                        <i class="fas fa-cog me-2"></i> Settings
-                    </a>
-                </li>
 
                 <!-- Admin Only Section -->
                 @if($role === 'admin')
