@@ -92,29 +92,39 @@ Route::middleware(['auth.check'])->group(function () {
         Route::middleware(['role:admin'])->post('/manual', [AttendanceController::class, 'manualEntry'])->name('manual');
     });
 
-    // ==================== LEAVE MANAGEMENT ROUTES ====================
-    Route::prefix('leaves')->name('leaves.')->group(function () {
-        Route::get('/', [LeaveController::class, 'index'])->name('index');
-        Route::get('/create', [LeaveController::class, 'create'])->name('create');
-        Route::post('/', [LeaveController::class, 'store'])->name('store');
-        Route::get('/{id}', [LeaveController::class, 'show'])->name('show');
+// ==================== LEAVE MANAGEMENT ROUTES ====================
+Route::prefix('leaves')->name('leaves.')->group(function () {
 
-        // Khusus Karyawan (Manage pengajuan sendiri)
-        Route::middleware(['role:employee'])->group(function () {
-            Route::get('/{id}/edit', [LeaveController::class, 'edit'])->name('edit');
-            Route::put('/{id}', [LeaveController::class, 'update'])->name('update');
-            Route::delete('/{id}', [LeaveController::class, 'destroy'])->name('destroy');
-            Route::get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
-            Route::post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('cancel');
-        });
+    // Halaman utama cuti
+    // Admin & Manager: lihat semua cuti
+    Route::middleware(['role:admin,manager'])->get('/', [LeaveController::class, 'index'])->name('index');
 
-        // Khusus Admin & Manager (Approval & Calendar)
-        Route::middleware(['role:admin,manager'])->group(function () {
-            Route::get('/calendar', [LeaveController::class, 'calendar'])->name('calendar');
-            Route::post('/{id}/approve', [LeaveController::class, 'approve'])->name('approve');
-            Route::post('/{id}/reject', [LeaveController::class, 'reject'])->name('reject');
-        });
+    // Employee: lihat cuti sendiri
+    Route::middleware(['role:employee'])->get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
+
+    // Ajukan cuti baru - semua role
+    Route::get('/create', [LeaveController::class, 'create'])->name('create');
+    Route::post('/', [LeaveController::class, 'store'])->name('store');
+
+    // Lihat detail cuti - semua role
+    Route::get('/{id}', [LeaveController::class, 'show'])->name('show');
+
+    // ==================== EMPLOYEE ONLY ====================
+    Route::middleware(['role:employee'])->group(function () {
+        Route::get('/{id}/edit', [LeaveController::class, 'edit'])->name('edit');
+        Route::put('/{id}', [LeaveController::class, 'update'])->name('update');
+        Route::delete('/{id}', [LeaveController::class, 'destroy'])->name('destroy');
+        Route::post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('cancel');
     });
+
+    // ==================== ADMIN & MANAGER ONLY ====================
+    Route::middleware(['role:admin,manager'])->group(function () {
+        Route::get('/calendar', [LeaveController::class, 'calendar'])->name('calendar');
+        Route::post('/{id}/approve', [LeaveController::class, 'approve'])->name('approve');
+        Route::post('/{id}/reject', [LeaveController::class, 'reject'])->name('reject');
+    });
+});
+
 
     // ==================== REPORTS (Admin & Manager Only) ====================
     Route::middleware(['role:admin,manager'])->prefix('reports')->name('reports.')->group(function () {

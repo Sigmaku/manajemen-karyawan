@@ -10,9 +10,9 @@
             <h1 class="h3 mb-0">Manajemen Pengajuan Cuti</h1>
             <p class="text-muted mb-0">Kelola semua pengajuan cuti karyawan</p>
         </div>
-        <a href="{{ route('leaves.create') }}" class="btn btn-primary">
+        <!-- <a href="{{ route('leaves.create') }}" class="btn btn-primary">
             <i class="fas fa-plus me-2"></i>Ajukan Cuti Atas Nama Karyawan
-        </a>
+        </a> -->
     </div>
 
     <!-- Filter -->

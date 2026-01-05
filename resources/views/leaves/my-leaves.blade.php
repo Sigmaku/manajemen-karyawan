@@ -17,21 +17,6 @@
 
     <!-- Card Summary -->
     <div class="row mb-4">
-        <div class="col-xl-3 col-md-6 mb-3">
-            <div class="card shadow-sm border-0 h-100">
-                <div class="card-body d-flex flex-column justify-content-center">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Sisa Cuti Tahunan</h6>
-                            <h4 class="mb-0">{{ $remainingLeave ?? '12' }} Hari</h4>
-                        </div>
-                        <div class="icon-shape bg-primary text-white rounded p-3">
-                            <i class="fas fa-calendar-days fa-2x"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
 
         <div class="col-xl-3 col-md-6 mb-3">
             <div class="card shadow-sm border-0 h-100">
@@ -101,16 +86,13 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse($leaves as $id => $leave)
+                        @forelse($leaves as $leave)
                             @php
-                                // Konversi tanggal ke Carbon agar bisa format dengan aman
-                                $createdAt = \Carbon\Carbon::parse($leave['created_at'] ?? $leave['createdAt'] ?? now());
-                                $startDate = \Carbon\Carbon::parse($leave['start_date'] ?? $leave['startDate']);
-                                $endDate = \Carbon\Carbon::parse($leave['end_date'] ?? $leave['endDate']);
+                                $createdAt = $leave->created_at;
+                                $startDate = \Carbon\Carbon::parse($leave->start_date);
+                                $endDate = \Carbon\Carbon::parse($leave->end_date);
                                 $days = $startDate->diffInDays($endDate) + 1;
 
-                                $status = $leave['status'] ?? 'pending';
-                                $leaveType = $leave['leave_type'] ?? $leave['type'] ?? 'annual';
                                 $leaveTypeName = [
                                     'annual' => 'Cuti Tahunan',
                                     'sick' => 'Cuti Sakit',
@@ -118,7 +100,7 @@
                                     'maternity' => 'Cuti Melahirkan',
                                     'paternity' => 'Cuti Ayah',
                                     'unpaid' => 'Cuti Tanpa Gaji'
-                                ][$leaveType] ?? 'Cuti Tahunan';
+                                ][$leave->leave_type] ?? 'Cuti Tahunan';
                             @endphp
 
                             <tr>
@@ -133,7 +115,7 @@
                                 </td>
                                 <td>{{ $days }} Hari</td>
                                 <td>
-                                    @switch($status)
+                                    @switch($leave->status)
                                         @case('pending')
                                             <span class="badge bg-warning text-dark">Menunggu</span>
                                             @break
@@ -151,19 +133,9 @@
                                     @endswitch
                                 </td>
                                 <td class="text-center">
-                                    <a href="{{ route('leaves.show', $id) }}" class="btn btn-sm btn-outline-primary" title="Lihat Detail">
+                                    <a href="{{ route('leaves.show', $leave->id) }}" class="btn btn-sm btn-outline-primary" title="Lihat Detail">
                                         <i class="fas fa-eye"></i>
                                     </a>
-
-                                    @if($status === 'pending')
-                                        <form action="{{ route('leaves.cancel', $id) }}" method="POST" class="d-inline">
-                                            @csrf
-                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Batalkan"
-                                                onclick="return confirm('Yakin ingin membatalkan pengajuan cuti ini?')">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </form>
-                                    @endif
                                 </td>
                             </tr>
                         @empty

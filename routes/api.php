@@ -17,6 +17,10 @@ Route::prefix('v1')->group(function () {
 
     // Attendance API
     Route::get('/attendance/today', [AttendanceController::class, 'apiToday']);
+    Route::get('/attendance/employee/{employeeId}', [AttendanceController::class, 'apiEmployeeAttendance']);
+
+    // Realtime employee status
+    Route::get('/employees/{employeeId}/status', [EmployeeController::class, 'apiStatus']);
 
     // Leave API
     Route::get('/leaves/employee/{employeeId}', [LeaveController::class, 'apiEmployeeLeaves']);

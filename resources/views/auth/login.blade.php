@@ -60,12 +60,6 @@
             <button type="submit" class="btn btn-primary w-100">Sign In</button>
         </form>
 
-        <div class="mt-3 text-center">
-            <p class="text-muted mb-2">Demo Credentials:</p>
-            <p class="mb-1"><strong>Admin:</strong> admin@company.com / password123</p>
-            <p class="mb-1"><strong>Manager:</strong> manager@company.com / password123</p>
-            <p class="mb-0"><strong>Employee:</strong> employee@company.com / password123</p>
-        </div>
     </div>
 </body>
 </html>

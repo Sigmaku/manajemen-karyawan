@@ -692,4 +692,64 @@ class FirebaseService
             throw $e;
         }
     }
+
+    // Tambahkan method ini di FirebaseService.php
+
+/**
+ * Get live employee status
+ */
+public function getEmployeeLiveStatus($employeeId)
+{
+    try {
+        $status = $this->database
+            ->getReference("liveStatus/{$this->companyId}/{$employeeId}")
+            ->getValue();
+
+        if ($status) {
+            // Get today's attendance for more details
+            $todayAttendance = $this->getTodayAttendance();
+            $todayData = $todayAttendance[$employeeId] ?? null;
+
+            return array_merge($status, [
+                'today_attendance' => $todayData,
+                'last_update' => $status['lastUpdate'] ?? null,
+                'current_status' => $status['status'] ?? 'unknown'
+            ]);
+        }
+
+        return ['status' => 'offline', 'last_update' => null];
+
+    } catch (\Exception $e) {
+        Log::error('Get employee live status error: ' . $e->getMessage());
+        return ['status' => 'error', 'last_update' => null];
+    }
+}
+
+/**
+ * Update live status
+ */
+public function updateLiveStatus($employeeId, $status, $data = [])
+{
+    try {
+        $updateData = [
+            'status' => $status,
+            'lastUpdate' => date('Y-m-d H:i:s'),
+            'updated_at' => now()->toISOString()
+        ];
+
+        if (!empty($data)) {
+            $updateData = array_merge($updateData, $data);
+        }
+
+        $this->database
+            ->getReference("liveStatus/{$this->companyId}/{$employeeId}")
+            ->set($updateData);
+
+        return true;
+
+    } catch (\Exception $e) {
+        Log::error('Update live status error: ' . $e->getMessage());
+        return false;
+    }
+}
 }

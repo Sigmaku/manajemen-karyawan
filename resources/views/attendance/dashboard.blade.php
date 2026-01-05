@@ -4,7 +4,7 @@
 <div class="container-fluid">
     <h1 class="h3 mb-4">Attendance Dashboard</h1>
 
-    <!-- Check In/Out Section -->
+    <!-- Check In/Out Section
     <div class="row mb-4">
         <div class="col-md-6">
             <div class="card text-center h-100">
@@ -38,7 +38,7 @@
                 </div>
             </div>
         </div>
-    </div>
+    </div> -->
 
     <!-- Today's Attendance Table -->
     <div class="card">

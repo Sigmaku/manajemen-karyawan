@@ -293,32 +293,50 @@
                 @endif
 
                 <!-- Attendance -->
-                <!-- <li class="nav-item">
+                <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('attendance.*') ? 'active' : '' }}" href="{{ route('attendance.dashboard') }}">
                         <i class="fas fa-clock me-2"></i> Attendance
                     </a>
-                </li> -->
-
-                <!-- Leave Management -->
-                <li class="nav-item">
-                    @if($role === 'employee')
-                        <a class="nav-link {{ request()->routeIs('leaves.my') || request()->routeIs('leaves.show') ? 'active' : '' }}"
-                        href="{{ route('leaves.my') }}">
-                            <i class="fas fa-calendar-alt me-2"></i> Leave Management
-                        </a>
-                    @else
-                        <a class="nav-link {{ request()->routeIs('leaves.index') ? 'active' : '' }}"
-                        href="{{ route('leaves.index') }}">
-                            <i class="fas fa-calendar-alt me-2"></i> Leave Management
-                        </a>
-                    @endif
                 </li>
+
+<!-- Leave Management -->
+<li class="nav-item">
+    @if($role === 'employee')
+        <a class="nav-link {{ request()->routeIs('leaves.my') || request()->routeIs('leaves.show') ? 'active' : '' }}"
+           href="{{ route('leaves.my') }}">
+            <i class="fas fa-calendar-alt me-2"></i> Leave Management
+        </a>
+    @else
+        <a class="nav-link {{ request()->routeIs('leaves.index') ? 'active' : '' }}"
+           href="{{ route('leaves.index') }}">
+            <i class="fas fa-calendar-alt me-2"></i> Leave Management
+        </a>
+    @endif
+</li>
 
                 <!-- Reports (Admin & Manager only) -->
                 @if(in_array($role, ['admin', 'manager']))
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle {{ request()->routeIs('reports.*') ? 'active' : '' }}" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-chart-bar me-2"></i> Reports
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="{{ route('reports.attendance') }}">Attendance Report</a></li>
+                        <li><a class="dropdown-item" href="{{ route('reports.employees') }}">Employee Report</a></li>
+                        <li><a class="dropdown-item" href="{{ route('reports.leaves') }}">Leave Report</a></li>
+                        <li><a class="dropdown-item" href="{{ route('reports.analytics') }}">Analytics</a></li>
+                    </ul>
+                </li>
+                @endif
+
+                <!-- Admin Only Section -->
+                @if($role === 'admin')
+                <li class="nav-item mt-3">
+                    <small class="text-muted ms-3">ADMINISTRATION</small>
+                </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('reports.attendance') ? 'active' : '' }}" href="{{ route('reports.attendance') }}">
-                        <i class="fas fa-chart-bar me-2"></i> Attendance Report
+                    <a class="nav-link {{ request()->routeIs('admin.*') ? 'active' : '' }}" href="{{ route('admin.dashboard') }}">
+                        <i class="fas fa-user-shield me-2"></i> Admin Panel
                     </a>
                 </li>
                 @endif
