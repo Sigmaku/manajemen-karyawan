@@ -90,38 +90,35 @@ Route::middleware(['auth.check'])->group(function () {
     // ==================== LEAVE MANAGEMENT ROUTES ====================
     Route::prefix('leaves')->name('leaves.')->group(function () {
 
-        // Halaman utama manajemen cuti
-        // Admin & Manager: lihat semua | Karyawan: lihat semua (tapi controller batasi)
-        Route::get('/', [LeaveController::class, 'index'])->name('index');
+        // Halaman utama: beda berdasarkan role
+        Route::middleware(['role:admin,manager'])->get('/', [LeaveController::class, 'index'])->name('index');
 
-        // Ajukan cuti baru - semua role (admin bisa atas nama orang lain)
-        Route::get('/create', [LeaveController::class, 'create'])->name('create');
-        Route::post('/', [LeaveController::class, 'store'])->name('store');
-
-        // Lihat detail cuti
-        Route::get('/{id}', [LeaveController::class, 'show'])->name('show');
-
-        // Edit & Hapus pengajuan (hanya pending & milik sendiri) - Karyawan only
-        Route::middleware(['role:employee'])->group(function () {
-            Route::get('/{id}/edit', [LeaveController::class, 'edit'])->name('edit');
-            Route::put('/{id}', [LeaveController::class, 'update'])->name('update'); // jika ada edit
-            Route::delete('/{id}', [LeaveController::class, 'destroy'])->name('destroy');
-        });
-
-        // Halaman "Cuti Saya" - khusus karyawan
+        // My Leaves - eksplisit route untuk employee
         Route::middleware(['role:employee'])->get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
 
         // Kalender cuti - hanya admin & manager
         Route::middleware(['role:admin,manager'])->get('/calendar', [LeaveController::class, 'calendar'])->name('calendar');
 
-        // APPROVE & REJECT CUTI - Hanya admin & manager
+        // Ajukan cuti baru - semua role boleh
+        Route::get('/create', [LeaveController::class, 'create'])->name('create');
+        Route::post('/', [LeaveController::class, 'store'])->name('store');
+
+        // Lihat detail cuti - semua boleh
+        Route::get('/{id}', [LeaveController::class, 'show'])->name('show');
+
+        // Edit & Hapus hanya untuk employee (cuti milik sendiri yang pending)
+        Route::middleware(['role:employee'])->group(function () {
+            Route::get('/{id}/edit', [LeaveController::class, 'edit'])->name('edit');
+            Route::put('/{id}', [LeaveController::class, 'update'])->name('update');
+            Route::delete('/{id}', [LeaveController::class, 'destroy'])->name('destroy');
+            Route::post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('cancel');
+        });
+
+        // APPROVE & REJECT - Hanya admin & manager
         Route::middleware(['role:admin,manager'])->group(function () {
             Route::post('/{id}/approve', [LeaveController::class, 'approve'])->name('approve');
             Route::post('/{id}/reject', [LeaveController::class, 'reject'])->name('reject');
         });
-
-        // CANCEL CUTI - Karyawan bisa batalkan pengajuan sendiri yang masih pending
-        Route::middleware(['role:employee'])->post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('cancel');
     });
 
     // ==================== REPORTS (Admin & Manager Only) ====================

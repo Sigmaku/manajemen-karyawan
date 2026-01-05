@@ -301,10 +301,18 @@
 
                 <!-- Leave Management -->
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('leaves.*') ? 'active' : '' }}" href="{{ route('leaves.index') }}">
-                        <i class="fas fa-calendar-alt me-2"></i> Leave Management
-                    </a>
-                </li>
+    @if($role === 'employee')
+        <a class="nav-link {{ request()->routeIs('leaves.my') || request()->routeIs('leaves.show') ? 'active' : '' }}"
+           href="{{ route('leaves.my') }}">
+            <i class="fas fa-calendar-alt me-2"></i> Leave Management
+        </a>
+    @else
+        <a class="nav-link {{ request()->routeIs('leaves.index') ? 'active' : '' }}"
+           href="{{ route('leaves.index') }}">
+            <i class="fas fa-calendar-alt me-2"></i> Leave Management
+        </a>
+    @endif
+</li>
 
                 <!-- Reports (Admin & Manager only) -->
                 @if(in_array($role, ['admin', 'manager']))

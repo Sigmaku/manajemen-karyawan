@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\FirebaseService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Barryvdh\DomPDF\Facade\Pdf;
+use PDF; // Pastikan package PDF sudah terinstall (contoh: barryvdh/laravel-dompdf)
 
 class ReportController extends Controller
 {
@@ -130,54 +130,84 @@ class ReportController extends Controller
     public function employees(Request $request)
     {
         try {
-            $employees = $this->firebase->getCompanyEmployees();
+            // Ambil semua karyawan perusahaan
+            $rawEmployees = $this->firebase->getCompanyEmployees();
+
+            // Konversi ke Collection agar lebih mudah diolah
+            $employeesCollection = collect($rawEmployees);
 
             // Filter departemen
             $department = $request->get('department');
             if ($department) {
-                $employees = array_filter($employees, fn($emp) => ($emp['department'] ?? '') === $department);
+                $employeesCollection = $employeesCollection->where('department', $department);
             }
 
             // Filter status
             $status = $request->get('status');
             if ($status) {
-                $employees = array_filter($employees, fn($emp) => ($emp['status'] ?? 'active') === $status);
+                $employeesCollection = $employeesCollection->where('status', $status);
             }
 
-            // Statistik
-            $total = count($employees);
-            $active = count(array_filter($employees, fn($emp) => ($emp['status'] ?? 'active') === 'active'));
-            $inactive = $total - $active;
+            // Konversi kembali ke array indexed (karena view mengharapkan array biasa dengan key numerik)
+            $employees = $employeesCollection->values()->all();
 
-            // Group by department
-            $byDepartment = [];
-            foreach ($employees as $emp) {
-                $dept = $emp['department'] ?? 'Tidak Ada Departemen';
-                $byDepartment[$dept] = ($byDepartment[$dept] ?? 0) + 1;
-            }
+            // Daftar departemen unik untuk dropdown filter
+            $departments = collect($rawEmployees)
+                ->pluck('department')
+                ->filter() // hilangkan null
+                ->unique()
+                ->sort()
+                ->values()
+                ->all();
 
+            // Statistik summary
+            $summary = [
+                'total'     => count($employees),
+                'active'    => $employeesCollection->where('status', 'active')->count(),
+                'inactive'  => $employeesCollection->where('status', '!=', 'active')->count(),
+                'on_leave'  => 0, // bisa ditambah nanti dari data cuti jika diperlukan
+            ];
+
+            // Group by department untuk statistik (jika ingin ditampilkan di view)
+            $byDepartment = $employeesCollection
+                ->groupBy(fn($emp) => $emp['department'] ?? 'Tidak Ada Departemen')
+                ->map->count()
+                ->sortDesc()
+                ->all();
+
+            // Export PDF (jika diminta)
             if ($request->get('export') === 'pdf') {
-                $pdf = PDF::loadView('reports.employees-pdf', compact(
-                    'employees',
-                    'total',
-                    'active',
-                    'inactive',
-                    'byDepartment'
-                ));
-                return $pdf->download('laporan-karyawan-' . now()->format('Y-m-d') . '.pdf');
+                // Pastikan Anda sudah install barryvdh/laravel-dompdf
+                $pdf = \PDF::loadView('reports.employees-pdf', [
+                    'employees'     => $employees,
+                    'summary'       => $summary,
+                    'byDepartment'  => $byDepartment,
+                    'filteredDept'  => $department,
+                    'filteredStatus' => $status,
+                    'generatedAt'   => now()->format('d F Y H:i')
+                ]);
+
+                return $pdf->download('Laporan_Karyawan_' . now()->format('Y-m-d') . '.pdf');
             }
 
+            // Export Excel (jika Anda punya route ini)
+            if ($request->get('export') === 'excel') {
+                return Excel::download(new EmployeesExport($employees), 'Laporan_Karyawan_' . now()->format('Y-m-d') . '.xlsx');
+            }
+
+            // Tampilkan view normal
             return view('reports.employees', compact(
                 'employees',
-                'total',
-                'active',
-                'inactive',
+                'departments',     // untuk dropdown filter
+                'summary',
                 'byDepartment',
-                'department',
-                'status'
+                'department',      // nilai filter saat ini
+                'status'           // nilai filter saat ini
             ));
         } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Gagal memuat laporan karyawan.');
+            \Log::error('Error Report Employees: ' . $e->getMessage());
+
+            return redirect()->back()->with('error', 'Gagal memuat laporan karyawan. Silakan coba lagi.');
         }
     }
 
