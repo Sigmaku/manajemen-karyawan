@@ -6,6 +6,7 @@ use App\Services\FirebaseService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Log;
 
 class ReportController extends Controller
 {
@@ -279,7 +280,7 @@ class ReportController extends Controller
                 'leaveDistribution'
             ));
         } catch (\Exception $e) {
-            \Log::error('Analytics Report Error: ' . $e->getMessage());
+            Log::error('Analytics Report Error: ' . $e->getMessage());
             return view('reports.analytics', [
                 'months'            => [],
                 'attendanceRates'   => [],
