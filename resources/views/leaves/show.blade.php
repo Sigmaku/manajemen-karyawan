@@ -5,16 +5,16 @@
 
 @section('content')
 <div class="container-fluid py-4">
-    <!-- Toast Notification (Success & Error) -->
+    <!-- Toast Notification -->
     @if(session('success'))
         <div class="position-fixed top-0 end-0 p-3" style="z-index: 9999;">
-            <div class="toast align-items-center text-bg-success border-0 show" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast align-items-center text-bg-success border-0 show" role="alert">
                 <div class="d-flex">
                     <div class="toast-body">
                         <i class="fas fa-check-circle me-2"></i>
                         {{ session('success') }}
                     </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
                 </div>
             </div>
         </div>
@@ -22,13 +22,13 @@
 
     @if(session('error'))
         <div class="position-fixed top-0 end-0 p-3" style="z-index: 9999;">
-            <div class="toast align-items-center text-bg-danger border-0 show" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast align-items-center text-bg-danger border-0 show" role="alert">
                 <div class="d-flex">
                     <div class="toast-body">
                         <i class="fas fa-exclamation-triangle me-2"></i>
                         {{ session('error') }}
                     </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
                 </div>
             </div>
         </div>
@@ -40,18 +40,22 @@
             <h1 class="h3 mb-0">Detail Pengajuan Cuti</h1>
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-0">
-                    <li class="breadcrumb-item"><a href="{{ route('leaves.index') }}">Manajemen Cuti</a></li>
+                    <li class="breadcrumb-item">
+                        <a href="{{ $role === 'employee' ? route('leaves.my') : route('leaves.index') }}">
+                            {{ $role === 'employee' ? 'Pengajuan Cuti Saya' : 'Manajemen Cuti' }}
+                        </a>
+                    </li>
                     <li class="breadcrumb-item active">Detail</li>
                 </ol>
             </nav>
         </div>
-        <a href="{{ route('leaves.index') }}" class="btn btn-secondary">
+        <a href="{{ $role === 'employee' ? route('leaves.my') : route('leaves.index') }}" class="btn btn-secondary">
             <i class="fas fa-arrow-left me-2"></i>Kembali
         </a>
     </div>
 
-    <!-- Main Content -->
     <div class="row">
+        <!-- Informasi Pengajuan -->
         <div class="col-lg-8">
             <div class="card shadow-sm">
                 <div class="card-header bg-white border-bottom">
@@ -121,8 +125,14 @@
 
         <!-- Aksi Persetujuan -->
         <div class="col-lg-4">
-            @if($leave->status === 'pending')
-                <div class="card shadow-sm border-0">
+            @php
+                $user = session('user');
+                $role = $user['role'] ?? 'employee';
+                $isApprover = in_array($role, ['admin', 'manager']);
+            @endphp
+
+            @if($leave->status === 'pending' && $isApprover)
+                <div class="card shadow-sm border-0 mb-4">
                     <div class="card-header bg-primary text-white">
                         <h6 class="mb-0"><i class="fas fa-gavel me-2"></i>Aksi Persetujuan</h6>
                     </div>
@@ -143,16 +153,25 @@
                         </button>
                     </div>
                 </div>
-            @else
+            @elseif($leave->status !== 'pending')
                 <div class="card shadow-sm border-0">
                     <div class="card-body text-center py-5">
                         <i class="fas fa-check-double text-success fa-4x mb-4"></i>
-                        <h5 class="text-muted">Pengajuan Sudah Diproses</h5>
+                        <h5 class="text-success">Pengajuan Sudah Diproses</h5>
                         @if($leave->status === 'approved')
                             <p class="text-success"><strong>Disetujui oleh:</strong><br>{{ $leave->approved_by ?? '-' }}</p>
                         @elseif($leave->status === 'rejected')
                             <p class="text-danger"><strong>Ditolak karena:</strong><br>{{ $leave->rejection_reason ?? '-' }}</p>
                         @endif
+                    </div>
+                </div>
+            @else
+                <!-- Untuk karyawan biasa yang melihat cuti sendiri -->
+                <div class="card shadow-sm border-0">
+                    <div class="card-body text-center py-5">
+                        <i class="fas fa-hourglass-half text-warning fa-4x mb-4"></i>
+                        <h5 class="text-warning">Menunggu Persetujuan</h5>
+                        <p class="text-muted">Pengajuan cuti Anda sedang ditinjau oleh atasan.</p>
                     </div>
                 </div>
             @endif
@@ -170,7 +189,7 @@
                     <h5 class="modal-title" id="rejectModalLabel">
                         <i class="fas fa-exclamation-triangle me-2"></i>Tolak Pengajuan Cuti
                     </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="alert alert-warning">
@@ -190,10 +209,10 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary btn-lg" data-bs-dismiss="modal">
-                        <i class="fas fa-arrow-left me-2"></i>Batal
+                        <i class="fas fa-times me-2"></i>Batal
                     </button>
                     <button type="submit" class="btn btn-danger btn-lg">
-                        <i class="fas fa-times me-2"></i>Tolak Pengajuan
+                        <i class="fas fa-ban me-2"></i>Tolak Pengajuan
                     </button>
                 </div>
             </form>
@@ -203,17 +222,14 @@
 @endsection
 
 @push('scripts')
-    <!-- Auto hide toast after 5 seconds -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const toasts = document.querySelectorAll('.toast');
-            toasts.forEach(toast => {
-                new bootstrap.Toast(toast, {
-                    delay: 5000
-                }).show();
-            });
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Auto show & hide toast
+        document.querySelectorAll('.toast').forEach(toast => {
+            new bootstrap.Toast(toast, { delay: 5000 }).show();
         });
-    </script>
+    });
+</script>
 @endpush
 
 @push('styles')

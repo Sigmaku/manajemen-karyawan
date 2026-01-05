@@ -139,7 +139,7 @@ class AttendanceController extends Controller
                 ->with('checkin_data', [
                     'employee_id' => $employeeId,
                     'employee_name' => $employee['name'] ?? 'Unknown',
-                    'check_in' => $record['checkIn'],
+                        'check_in' => $record['checkIn'],
                     'location' => $record['location'],
                     'time' => $record['checkIn']
                 ]);
