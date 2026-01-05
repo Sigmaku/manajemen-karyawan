@@ -67,6 +67,23 @@ Route::middleware(['auth.check'])->group(function () {
         Route::get('/{id}/edit', [EmployeeController::class, 'edit'])->name('edit');
         Route::put('/{id}', [EmployeeController::class, 'update'])->name('update');
         Route::delete('/{id}', [EmployeeController::class, 'destroy'])->name('destroy');
+
+        // Tambahkan routes untuk account management
+        Route::post('/{id}/create-account', [EmployeeController::class, 'createAccount'])->name('create-account');
+        Route::post('/{id}/reset-password', [EmployeeController::class, 'resetPassword'])->name('reset-password');
+
+        Route::post('/{id}/update-password', [EmployeeController::class, 'updatePassword'])
+            ->name('update-password');
+
+        Route::post('/{id}/force-password-change', [EmployeeController::class, 'forcePasswordChange'])
+            ->name('force-password-change');
+
+        Route::get('/{id}/password-history', [EmployeeController::class, 'getPasswordHistory'])
+            ->name('password-history');
+
+        // Password policy check (public)
+        Route::post('/check-password-policy', [EmployeeController::class, 'checkPasswordPolicy'])
+            ->name('password.policy.check');
     });
 
     // ==================== ATTENDANCE ROUTES ====================

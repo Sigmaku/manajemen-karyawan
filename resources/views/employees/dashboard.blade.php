@@ -85,6 +85,7 @@
                         }
                     @endphp
 
+                    <!-- Di bagian Today's Status Card -->
                     @if($todayAttendance && isset($todayAttendance['checkIn']))
                     <div class="row align-items-center">
                         <div class="col-md-8">
@@ -110,9 +111,12 @@
                         </div>
                         <div class="col-md-4 text-end">
                             @if(!isset($todayAttendance['checkOut']))
-                            <button class="btn btn-danger btn-lg" onclick="checkOut()">
-                                <i class="fas fa-sign-out-alt me-2"></i>Check Out
-                            </button>
+                            <form action="{{ route('attendance.check-out') }}" method="POST">
+                                @csrf
+                                <button type="submit" class="btn btn-danger btn-lg">
+                                    <i class="fas fa-sign-out-alt me-2"></i>Check Out
+                                </button>
+                            </form>
                             @else
                             <button class="btn btn-secondary btn-lg" disabled>
                                 <i class="fas fa-check me-2"></i>Completed
@@ -135,9 +139,14 @@
                             </div>
                         </div>
                         <div class="col-md-4 text-end">
-                            <button class="btn btn-success btn-lg" data-bs-toggle="modal" data-bs-target="#checkInModal">
-                                <i class="fas fa-sign-in-alt me-2"></i>Check In
-                            </button>
+                            <form action="{{ route('attendance.check-in') }}" method="POST">
+                                @csrf
+                                <input type="hidden" name="location" value="Office">
+                                <input type="hidden" name="notes" value="">
+                                <button type="submit" class="btn btn-success btn-lg">
+                                    <i class="fas fa-sign-in-alt me-2"></i>Check In
+                                </button>
+                            </form>
                         </div>
                     </div>
                     @endif
