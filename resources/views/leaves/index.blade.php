@@ -126,17 +126,17 @@
         <!-- Approve -->
         <form action="{{ route('leaves.approve', $leave->id) }}" method="POST" class="d-inline">
             @csrf
-            <button type="submit" class="btn btn-sm btn-success ms-1" title="Setujui Cuti"
+            {{-- <button type="submit" class="btn btn-sm btn-success ms-1" title="Setujui Cuti"
                 onclick="return confirm('Yakin ingin menyetujui pengajuan cuti ini?')">
                 <i class="fas fa-check"></i>
-            </button>
+            </button> --}}
         </form>
 
         <!-- Reject dengan Modal -->
-        <button type="button" class="btn btn-sm btn-danger ms-1" title="Tolak Cuti"
+        {{-- <button type="button" class="btn btn-sm btn-danger ms-1" title="Tolak Cuti"
             data-bs-toggle="modal" data-bs-target="#rejectModal-{{ $leave->id }}">
             <i class="fas fa-times"></i>
-        </button>
+        </button> --}}
     @else
         <span class="text-muted small">Sudah diproses</span>
     @endif

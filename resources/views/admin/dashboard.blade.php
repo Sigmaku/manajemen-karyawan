@@ -44,62 +44,125 @@
     <div class="row">
         <!-- Left Column -->
         <div class="col-md-8">
-            <!-- Today's Attendance -->
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Today's Attendance ({{ date('F d, Y') }})</h5>
-                    <div>
-                        <span class="badge bg-success">Present: {{ count($attendanceList) }}</span>
-                        <span class="badge bg-danger ms-2">Absent: {{ $stats['total_employees'] - count($attendanceList) }}</span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Employee</th>
-                                    <th>Department</th>
-                                    <th>Check In</th>
-                                    <th>Check Out</th>
-                                    <th>Location</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @forelse($attendanceList as $item)
-                                <tr>
-                                    <td>
-                                        <strong>{{ $item['employee']['name'] ?? 'Unknown' }}</strong><br>
-                                        <small class="text-muted">{{ $item['employee']['position'] ?? '-' }}</small>
-                                    </td>
-                                    <td>{{ $item['employee']['department'] ?? '-' }}</td>
-                                    <td>{{ $item['attendance']['checkIn'] ?? '-' }}</td>
-                                    <td>{{ $item['attendance']['checkOut'] ?? '-' }}</td>
-                                    <td>{{ $item['attendance']['location'] ?? 'Office' }}</td>
-                                    <td>
-                                        @if(isset($item['attendance']['checkIn']))
-                                            <span class="badge bg-success">Present</span>
-                                        @else
-                                            <span class="badge bg-danger">Absent</span>
-                                        @endif
-                                    </td>
-                                </tr>
-                                @empty
-                                <tr>
-                                    <td colspan="6" class="text-center py-4">
-                                        <div class="text-muted">
-                                            <i class="fas fa-clock fa-2x mb-3"></i>
-                                            <p>No attendance recorded yet for today</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                                @endforelse
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+<!-- Today's Attendance -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Today's Attendance ({{ date('F d, Y') }})</h5>
+        <div>
+            <span class="badge bg-success">Present: {{ count($attendanceList) }}</span>
+            <span class="badge bg-danger ms-2">Absent: {{ $stats['total_employees'] - count($attendanceList) }}</span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover" id="attendanceTable">
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Department</th>
+                        <th>Check In</th>
+                        <th>Check Out</th>
+                        <th>Location</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($attendanceList as $index => $item)
+                    <tr class="attendance-row">
+                        <td>
+                            <strong>{{ $item['employee']['name'] ?? 'Unknown' }}</strong><br>
+                            <small class="text-muted">{{ $item['employee']['position'] ?? '-' }}</small>
+                        </td>
+                        <td>{{ $item['employee']['department'] ?? '-' }}</td>
+                        <td>{{ $item['attendance']['checkIn'] ?? '-' }}</td>
+                        <td>{{ $item['attendance']['checkOut'] ?? '-' }}</td>
+                        <td>{{ $item['attendance']['location'] ?? 'Office' }}</td>
+                        <td>
+                            @if(isset($item['attendance']['checkIn']))
+                                <span class="badge bg-success">Present</span>
+                            @else
+                                <span class="badge bg-danger">Absent</span>
+                            @endif
+                        </td>
+                    </tr>
+                    @empty
+                    <tr>
+                        <td colspan="6" class="text-center py-4">
+                            <div class="text-muted">
+                                <i class="fas fa-clock fa-2x mb-3"></i>
+                                <p>No attendance recorded yet for today</p>
+                            </div>
+                        </td>
+                    </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination Manual dengan JS -->
+        <div id="paginationControls" class="d-flex justify-content-between align-items-center mt-4" style="display: none;">
+            <div>
+                Showing <span id="showingStart">1</span> to <span id="showingEnd">10</span> of <span id="totalItems">{{ count($attendanceList) }}</span> entries
             </div>
+            <nav>
+                <ul class="pagination mb-0">
+                    <li class="page-item"><button class="page-link" id="prevBtn">Previous</button></li>
+                    <li class="page-item"><button class="page-link" id="nextBtn">Next</button></li>
+                </ul>
+            </nav>
+        </div>
+    </div>
+</div>
+@section('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const rows = document.querySelectorAll('#attendanceTable .attendance-row');
+    const totalItems = rows.length;
+    const itemsPerPage = 10;
+    let currentPage = 1;
+
+    if (totalItems <= itemsPerPage) {
+        document.getElementById('paginationControls').style.display = 'none';
+        return;
+    }
+
+    document.getElementById('paginationControls').style.display = 'flex';
+    document.getElementById('totalItems').textContent = totalItems;
+
+    function showPage(page) {
+        const start = (page - 1) * itemsPerPage;
+        const end = start + itemsPerPage;
+
+        rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
+        });
+
+        document.getElementById('showingStart').textContent = start + 1;
+        document.getElementById('showingEnd').textContent = Math.min(end, totalItems);
+
+        // Update button state
+        document.getElementById('prevBtn').parentElement.classList.toggle('disabled', page === 1);
+        document.getElementById('nextBtn').parentElement.classList.toggle('disabled', page === Math.ceil(totalItems / itemsPerPage));
+    }
+
+    document.getElementById('prevBtn').addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            showPage(currentPage);
+        }
+    });
+
+    document.getElementById('nextBtn').addEventListener('click', () => {
+        if (currentPage < Math.ceil(totalItems / itemsPerPage)) {
+            currentPage++;
+            showPage(currentPage);
+        }
+    });
+
+    showPage(1); // Initial display
+});
+</script>
+@endsection
 
             <!-- Department Stats -->
             <div class="card">
