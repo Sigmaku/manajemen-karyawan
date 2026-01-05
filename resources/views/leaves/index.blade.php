@@ -1,156 +1,152 @@
+{{-- resources/views/leaves/index.blade.php --}}
 @extends('layouts.app')
 
-@section('title', 'Pengajuan Cuti Saya')
+@section('title', 'Manajemen Pengajuan Cuti')
 
 @section('content')
 <div class="container-fluid py-4">
-    <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h1 class="h3 mb-0">Pengajuan Cuti Saya</h1>
-            <p class="text-muted mb-0">Riwayat dan status pengajuan cuti Anda</p>
+            <h1 class="h3 mb-0">Manajemen Pengajuan Cuti</h1>
+            <p class="text-muted mb-0">Kelola semua pengajuan cuti karyawan</p>
         </div>
         <a href="{{ route('leaves.create') }}" class="btn btn-primary">
-            <i class="fas fa-plus me-2"></i>Ajukan Cuti Baru
+            <i class="fas fa-plus me-2"></i>Ajukan Cuti Atas Nama Karyawan
         </a>
     </div>
 
-    <!-- Card Summary -->
-    <div class="row mb-4">
-        <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm border-0">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Sisa Cuti Tahunan</h6>
-                            <h4 class="mb-0">{{ $remainingLeave ?? '12' }} Hari</h4>
-                        </div>
-                        <div class="icon-shape bg-primary text-white rounded p-3">
-                            <i class="fas fa-calendar-days fa-2x"></i>
-                        </div>
+    <!-- Filter -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <form method="GET" action="{{ route('leaves.index') }}">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Status</label>
+                        <select name="status" class="form-select">
+                            <option value="all" {{ $status == 'all' ? 'selected' : '' }}>Semua Status</option>
+                            <option value="pending" {{ $status == 'pending' ? 'selected' : '' }}>Menunggu</option>
+                            <option value="approved" {{ $status == 'approved' ? 'selected' : '' }}>Disetujui</option>
+                            <option value="rejected" {{ $status == 'rejected' ? 'selected' : '' }}>Ditolak</option>
+                            <option value="canceled" {{ $status == 'canceled' ? 'selected' : '' }}>Dibatalkan</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Karyawan</label>
+                        <select name="employee_id" class="form-select">
+                            <option value="">Semua Karyawan</option>
+                            @foreach($employees as $id => $emp)
+                                <option value="{{ $id }}" {{ $employeeId == $id ? 'selected' : '' }}>
+                                    {{ $emp['name'] }} ({{ $emp['department'] ?? 'Tidak Ada Dept' }})
+                                </option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button type="submit" class="btn btn-outline-primary me-2">
+                            <i class="fas fa-filter"></i> Filter
+                        </button>
+                        <a href="{{ route('leaves.index') }}" class="btn btn-outline-secondary">
+                            Reset
+                        </a>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm border-0">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Pengajuan Tertunda</h6>
-                            <h4 class="mb-0">{{ $pendingLeaves ?? '0' }}</h4>
-                        </div>
-                        <div class="icon-shape bg-warning text-white rounded p-3">
-                            <i class="fas fa-hourglass-half fa-2x"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm border-0">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Disetujui</h6>
-                            <h4 class="mb-0 text-success">{{ $approvedLeaves ?? '0' }}</h4>
-                        </div>
-                        <div class="icon-shape bg-success text-white rounded p-3">
-                            <i class="fas fa-check-circle fa-2x"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-3 col-md-6">
-            <div class="card shadow-sm border-0">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Ditolak</h6>
-                            <h4 class="mb-0 text-danger">{{ $rejectedLeaves ?? '0' }}</h4>
-                        </div>
-                        <div class="icon-shape bg-danger text-white rounded p-3">
-                            <i class="fas fa-times-circle fa-2x"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            </form>
         </div>
     </div>
 
-    <!-- Tabel Pengajuan Cuti -->
+    <!-- Tabel Cuti -->
     <div class="card shadow-sm border-0">
         <div class="card-header bg-white py-3">
-            <h5 class="mb-0">Riwayat Pengajuan Cuti</h5>
+            <h5 class="mb-0">Daftar Pengajuan Cuti</h5>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="bg-light">
                         <tr>
-                            <th class="ps-4">Tanggal Pengajuan</th>
+                            <th>No</th>
+                            <th>Karyawan</th>
+                            <th>Departemen</th>
                             <th>Jenis Cuti</th>
-                            <th>Periode Cuti</th>
-                            <th>Jumlah Hari</th>
+                            <th>Tanggal Mulai</th>
+                            <th>Tanggal Selesai</th>
                             <th>Status</th>
+                            <th>Diajukan Pada</th>
                             <th class="text-center">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
                         @forelse($leaves as $leave)
                             <tr>
-                                <td class="ps-4">{{ $leave->created_at->format('d M Y H:i') }}</td>
-                                <td>{{ $leave->leave_type->name ?? $leave->leave_type ?? 'Cuti Tahunan' }}</td>
+                                <td>{{ $loop->iteration + $leaves->firstItem() - 1 }}</td>
+                                <td>{{ $leave->employee_name }}</td>
+                                <td>{{ $leave->employee_department }}</td>
                                 <td>
-                                    {{ $leave->start_date->format('d M Y') }}
-                                    <br>
-                                    <small class="text-muted">s/d</small>
-                                    <br>
-                                    {{ $leave->end_date->format('d M Y') }}
+                                    @php
+                                        $types = [
+                                            'annual' => 'Cuti Tahunan',
+                                            'sick' => 'Cuti Sakit',
+                                            'personal' => 'Cuti Pribadi',
+                                            'maternity' => 'Cuti Melahirkan',
+                                            'paternity' => 'Cuti Ayah',
+                                            'unpaid' => 'Tanpa Gaji'
+                                        ];
+                                    @endphp
+                                    {{ $types[$leave->leave_type] ?? ucfirst($leave->leave_type) }}
                                 </td>
-                                <td>{{ $leave->days }} Hari</td>
+                                <td>{{ \Carbon\Carbon::parse($leave->start_date)->format('d/m/Y') }}</td>
+                                <td>{{ \Carbon\Carbon::parse($leave->end_date)->format('d/m/Y') }}</td>
                                 <td>
-                                    @if($leave->status === 'pending')
-                                        <span class="badge bg-warning">Menunggu</span>
-                                    @elseif($leave->status === 'approved')
-                                        <span class="badge bg-success">Disetujui</span>
-                                    @elseif($leave->status === 'rejected')
-                                        <span class="badge bg-danger">Ditolak</span>
-                                    @elseif($leave->status === 'canceled')
-                                        <span class="badge bg-secondary">Dibatalkan</span>
-                                    @else
-                                        <span class="badge bg-info">Proses</span>
-                                    @endif
+                                    @switch($leave->status)
+                                        @case('pending')
+                                            <span class="badge bg-warning text-dark">Menunggu</span>
+                                            @break
+                                        @case('approved')
+                                            <span class="badge bg-success">Disetujui</span>
+                                            @break
+                                        @case('rejected')
+                                            <span class="badge bg-danger">Ditolak</span>
+                                            @break
+                                        @case('canceled')
+                                            <span class="badge bg-secondary">Dibatalkan</span>
+                                            @break
+                                        @default
+                                            <span class="badge bg-info">{{ ucfirst($leave->status) }}</span>
+                                    @endswitch
                                 </td>
+                                <td>{{ $leave->created_at->format('d/m/Y H:i') }}</td>
                                 <td class="text-center">
-                                    <a href="{{ route('leaves.show', $leave->id) }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-eye"></i>
-                                    </a>
-                                    @if($leave->status === 'pending')
-                                        <form action="{{ route('leaves.destroy', $leave->id) }}" method="POST" class="d-inline">
-                                            @csrf
-                                            @method('DELETE')
-                                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Yakin ingin membatalkan pengajuan ini?')">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </form>
-                                    @endif
-                                </td>
+    <!-- Tombol Detail -->
+    <a href="{{ route('leaves.show', $leave->id) }}" class="btn btn-sm btn-info" title="Lihat Detail">
+        <i class="fas fa-eye"></i>
+    </a>
+
+    <!-- Tombol Approve & Reject hanya jika status pending -->
+    @if($leave->status === 'pending')
+        <!-- Approve -->
+        <form action="{{ route('leaves.approve', $leave->id) }}" method="POST" class="d-inline">
+            @csrf
+            <button type="submit" class="btn btn-sm btn-success ms-1" title="Setujui Cuti"
+                onclick="return confirm('Yakin ingin menyetujui pengajuan cuti ini?')">
+                <i class="fas fa-check"></i>
+            </button>
+        </form>
+
+        <!-- Reject dengan Modal -->
+        <button type="button" class="btn btn-sm btn-danger ms-1" title="Tolak Cuti"
+            data-bs-toggle="modal" data-bs-target="#rejectModal-{{ $leave->id }}">
+            <i class="fas fa-times"></i>
+        </button>
+    @else
+        <span class="text-muted small">Sudah diproses</span>
+    @endif
+</td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="6" class="text-center py-5">
-                                    <div class="text-muted">
-                                        <i class="fas fa-calendar-xmark fa-3x mb-3"></i>
-                                        <p>Belum ada pengajuan cuti</p>
-                                        <a href="{{ route('leaves.create') }}" class="btn btn-outline-primary mt-2">
-                                            Ajukan cuti pertama Anda sekarang
-                                        </a>
-                                    </div>
+                                <td colspan="9" class="text-center py-5 text-muted">
+                                    <i class="fas fa-inbox fa-3x mb-3"></i>
+                                    <p>Tidak ada data pengajuan cuti</p>
                                 </td>
                             </tr>
                         @endforelse
@@ -159,7 +155,7 @@
             </div>
         </div>
         <div class="card-footer bg-white">
-            {{ $leaves->links('pagination::bootstrap-5') }}
+            {{ $leaves->appends(request()->query())->links('pagination::bootstrap-5') }}
         </div>
     </div>
 </div>

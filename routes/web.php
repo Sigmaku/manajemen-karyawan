@@ -16,162 +16,162 @@ use App\Http\Controllers\AdminController;
 | Web Routes
 |--------------------------------------------------------------------------
 |
-| Here is where you can register web routes for your application. These
-| routes are loaded by the RouteServiceProvider within a group which
-| contains the "web" middleware group. Now create something great!
+| Semua route aplikasi didefinisikan di sini.
+| Route dilindungi middleware auth.check (harus login)
+| dan role middleware untuk pembatasan akses.
 |
 */
 
-// ==================== PUBLIC ROUTES ====================
+// ==================== TEST ROUTES (Hanya untuk development) ====================
 Route::get('/test-route', function () {
     return '✅ Route is working! Laravel version: ' . app()->version();
 });
 
 Route::get('/test-firebase-connection', function () {
     try {
-        $firebase = app(App\Services\FirebaseService::class);
+        $firebase = app(\App\Services\FirebaseService::class);
         $db = $firebase->getDatabase();
-        $db->getReference('test')->set(['test' => 'success', 'time' => now()]);
+        $db->getReference('test')->set(['status' => 'connected', 'time' => now()->toISOString()]);
         return '✅ Firebase connected successfully!';
     } catch (\Exception $e) {
         return '❌ Firebase error: ' . $e->getMessage();
     }
 });
 
-// Authentication
+// ==================== AUTHENTICATION ROUTES (Publik) ====================
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
-// ==================== PROTECTED ROUTES ====================
+// ==================== PROTECTED ROUTES (Harus Login) ====================
 Route::middleware(['auth.check'])->group(function () {
 
-    // Dashboard - Role based
+    // Dashboard Utama
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
-    // Profile - All roles
+    // Profile - Akses semua role
     Route::get('/profile', [ProfileController::class, 'index'])->name('profile');
     Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
 
-    // Settings - All roles
+    // Settings - Akses semua role
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::put('/settings', [SettingsController::class, 'update'])->name('settings.update');
 
-    // ==================== EMPLOYEE ROUTES ====================
-    // Employee Management - Admin & Manager only
-    Route::middleware(['role:admin,manager'])->prefix('employees')->name('employees.')->group(function () {
-        Route::get('/', [EmployeeController::class, 'index'])->name('index');
-        Route::get('/create', [EmployeeController::class, 'create'])->name('create');
-        Route::post('/', [EmployeeController::class, 'store'])->name('store');
-        Route::get('/{id}', [EmployeeController::class, 'show'])->name('show');
-        Route::get('/{id}/edit', [EmployeeController::class, 'edit'])->name('edit');
-        Route::put('/{id}', [EmployeeController::class, 'update'])->name('update');
-        Route::delete('/{id}', [EmployeeController::class, 'destroy'])->name('destroy');
-    });
+    // ==================== EMPLOYEE MANAGEMENT (Admin & Manager Only) ====================
+    Route::middleware(['role:admin,manager'])
+        ->prefix('employees')
+        ->name('employees.')
+        ->group(function () {
+            Route::get('/', [EmployeeController::class, 'index'])->name('index');
+            Route::get('/create', [EmployeeController::class, 'create'])->name('create');
+            Route::post('/', [EmployeeController::class, 'store'])->name('store');
+            Route::get('/{id}', [EmployeeController::class, 'show'])->name('show');
+            Route::get('/{id}/edit', [EmployeeController::class, 'edit'])->name('edit');
+            Route::put('/{id}', [EmployeeController::class, 'update'])->name('update');
+            Route::delete('/{id}', [EmployeeController::class, 'destroy'])->name('destroy');
+        });
 
     // ==================== ATTENDANCE ROUTES ====================
-    // Attendance Routes - All roles with different access
     Route::prefix('attendance')->name('attendance.')->group(function () {
-        // Dashboard - All roles (different views)
         Route::get('/dashboard', [AttendanceController::class, 'dashboard'])->name('dashboard');
-
-        // Reports - All roles (employee sees only their own)
         Route::get('/report', [AttendanceController::class, 'report'])->name('report');
-
-        // History - All roles (employee sees only their own)
         Route::get('/history', [AttendanceController::class, 'history'])->name('history');
 
-        // Check-in/out - Employees only
+        // Check-in & Check-out hanya untuk karyawan
         Route::middleware(['role:employee'])->group(function () {
             Route::post('/check-in', [AttendanceController::class, 'checkIn'])->name('check-in');
             Route::post('/check-out', [AttendanceController::class, 'checkOut'])->name('check-out');
         });
 
-        // Manual entry - Admin only
+        // Manual entry hanya untuk admin
         Route::middleware(['role:admin'])->post('/manual', [AttendanceController::class, 'manualEntry'])->name('manual');
     });
 
-    // ==================== LEAVE ROUTES ====================
-    // Leaves - All roles with different access
+    // ==================== LEAVE MANAGEMENT ROUTES ====================
     Route::prefix('leaves')->name('leaves.')->group(function () {
-        // Index - All roles see different data
+
+        // Halaman utama manajemen cuti
+        // Admin & Manager: lihat semua | Karyawan: lihat semua (tapi controller batasi)
         Route::get('/', [LeaveController::class, 'index'])->name('index');
 
-        // Create - All employees can apply
+        // Ajukan cuti baru - semua role (admin bisa atas nama orang lain)
         Route::get('/create', [LeaveController::class, 'create'])->name('create');
         Route::post('/', [LeaveController::class, 'store'])->name('store');
 
-        // Show - All roles (employee sees only their own)
+        // Lihat detail cuti
         Route::get('/{id}', [LeaveController::class, 'show'])->name('show');
 
-        // Edit - All employees can edit their own pending leaves
-        Route::get('/{id}/edit', [LeaveController::class, 'edit'])->name('edit');
+        // Edit & Hapus pengajuan (hanya pending & milik sendiri) - Karyawan only
+        Route::middleware(['role:employee'])->group(function () {
+            Route::get('/{id}/edit', [LeaveController::class, 'edit'])->name('edit');
+            Route::put('/{id}', [LeaveController::class, 'update'])->name('update'); // jika ada edit
+            Route::delete('/{id}', [LeaveController::class, 'destroy'])->name('destroy');
+        });
 
-        // Destroy - All employees can delete their own pending leaves
-        Route::delete('/{id}', [LeaveController::class, 'destroy'])->name('destroy');
+        // Halaman "Cuti Saya" - khusus karyawan
+        Route::middleware(['role:employee'])->get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
 
-        // My leaves - Employees only
-        Route::get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
-
-        // Calendar - Admin & Manager only
+        // Kalender cuti - hanya admin & manager
         Route::middleware(['role:admin,manager'])->get('/calendar', [LeaveController::class, 'calendar'])->name('calendar');
 
-        // Approve/Reject - Admin & Manager only
+        // APPROVE & REJECT CUTI - Hanya admin & manager
         Route::middleware(['role:admin,manager'])->group(function () {
             Route::post('/{id}/approve', [LeaveController::class, 'approve'])->name('approve');
             Route::post('/{id}/reject', [LeaveController::class, 'reject'])->name('reject');
         });
 
-        // Cancel - Employees can cancel their own pending leaves
-        Route::post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('cancel');
+        // CANCEL CUTI - Karyawan bisa batalkan pengajuan sendiri yang masih pending
+        Route::middleware(['role:employee'])->post('/{id}/cancel', [LeaveController::class, 'cancel'])->name('cancel');
     });
 
-    // ==================== REPORT ROUTES ====================
-    // Reports - Admin & Manager only (READ ONLY)
-    Route::middleware(['role:admin,manager'])->prefix('reports')->name('reports.')->group(function () {
-        Route::get('/attendance', [ReportController::class, 'attendance'])->name('attendance');
-        Route::get('/employees', [ReportController::class, 'employees'])->name('employees');
-        Route::get('/leaves', [ReportController::class, 'leaves'])->name('leaves');
-        Route::get('/analytics', [ReportController::class, 'analytics'])->name('analytics');
+    // ==================== REPORTS (Admin & Manager Only) ====================
+    Route::middleware(['role:admin,manager'])
+        ->prefix('reports')
+        ->name('reports.')
+        ->group(function () {
+            Route::get('/attendance', [ReportController::class, 'attendance'])->name('attendance');
+            Route::get('/employees', [ReportController::class, 'employees'])->name('employees');
+            Route::get('/leaves', [ReportController::class, 'leaves'])->name('leaves');
+            Route::get('/analytics', [ReportController::class, 'analytics'])->name('analytics');
 
-        // Export routes
-        Route::get('/export/attendance', [ReportController::class, 'exportAttendance'])->name('export.attendance');
-        Route::get('/export/employees', [ReportController::class, 'exportEmployees'])->name('export.employees');
-        Route::get('/export/leaves', [ReportController::class, 'exportLeaves'])->name('export.leaves');
-    });
+            Route::get('/export/attendance', [ReportController::class, 'exportAttendance'])->name('export.attendance');
+            Route::get('/export/employees', [ReportController::class, 'exportEmployees'])->name('export.employees');
+            Route::get('/export/leaves', [ReportController::class, 'exportLeaves'])->name('export.leaves');
+        });
 
-    // ==================== ADMIN ROUTES ====================
-    // Admin Panel - Admin only
-    Route::middleware(['role:admin'])->prefix('admin')->name('admin.')->group(function () {
-        // Dashboard
-        Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('dashboard');
+    // ==================== ADMIN PANEL (Admin Only) ====================
+    Route::middleware(['role:admin'])
+        ->prefix('admin')
+        ->name('admin.')
+        ->group(function () {
+            Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('dashboard');
 
-        // User Management
-        Route::get('/users', [AdminController::class, 'users'])->name('users');
-        Route::post('/users', [AdminController::class, 'createUser'])->name('users.create');
-        Route::post('/users/{id}/reset-password', [AdminController::class, 'resetPassword'])->name('users.reset');
+            // User Management
+            Route::get('/users', [AdminController::class, 'users'])->name('users');
+            Route::post('/users', [AdminController::class, 'createUser'])->name('users.create');
+            Route::post('/users/{id}/reset-password', [AdminController::class, 'resetPassword'])->name('users.reset');
 
-        // System Logs
-        Route::get('/logs', [AdminController::class, 'logs'])->name('logs');
+            // Logs
+            Route::get('/logs', [AdminController::class, 'logs'])->name('logs');
 
-        // Backup & Restore
-        Route::get('/backup', [AdminController::class, 'backup'])->name('backup');
-        Route::post('/backup', [AdminController::class, 'createBackup'])->name('backup.create');
-        Route::post('/backup/{id}/restore', [AdminController::class, 'restoreBackup'])->name('backup.restore');
+            // Backup & Restore
+            Route::get('/backup', [AdminController::class, 'backup'])->name('backup');
+            Route::post('/backup', [AdminController::class, 'createBackup'])->name('backup.create');
+            Route::post('/backup/{id}/restore', [AdminController::class, 'restoreBackup'])->name('backup.restore');
 
-        // System Settings
-        Route::get('/settings', [AdminController::class, 'systemSettings'])->name('settings');
-        Route::put('/settings', [AdminController::class, 'updateSystemSettings'])->name('settings.update');
+            // System Settings
+            Route::get('/settings', [AdminController::class, 'systemSettings'])->name('settings');
+            Route::put('/settings', [AdminController::class, 'updateSystemSettings'])->name('settings.update');
 
-        // Bulk Operations
-        Route::post('/employees/bulk-delete', [AdminController::class, 'bulkDelete'])->name('employees.bulk.delete');
-        Route::post('/employees/bulk-status', [AdminController::class, 'bulkStatus'])->name('employees.bulk.status');
-        Route::post('/attendance/bulk-entry', [AdminController::class, 'bulkEntry'])->name('attendance.bulk.entry');
-        Route::post('/leaves/bulk-approve', [AdminController::class, 'bulkApprove'])->name('leaves.bulk.approve');
-    });
+            // Bulk Operations
+            Route::post('/employees/bulk-delete', [AdminController::class, 'bulkDelete'])->name('employees.bulk.delete');
+            Route::post('/employees/bulk-status', [AdminController::class, 'bulkStatus'])->name('employees.bulk.status');
+            Route::post('/attendance/bulk-entry', [AdminController::class, 'bulkEntry'])->name('attendance.bulk.entry');
+            Route::post('/leaves/bulk-approve', [AdminController::class, 'bulkApprove'])->name('leaves.bulk.approve');
+        });
 });
 
-// ==================== FALLBACK ROUTES ====================
+// ==================== FALLBACK ROUTE ====================
 Route::fallback(function () {
-    return redirect()->route('dashboard')->with('error', 'Page not found');
+    return redirect()->route('dashboard')->with('error', 'Halaman tidak ditemukan.');
 });
