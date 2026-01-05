@@ -82,7 +82,7 @@ class DashboardController extends Controller
                 $employeeLeaves = $this->firebase->getEmployeeLeaves($employeeId);
             }
 
-            return view('employee.dashboard', compact('stats', 'employeeAttendance', 'employeeLeaves'));
+            return view('employees.dashboard', compact('stats', 'employeeAttendance', 'employeeLeaves'));
         }
     }
 

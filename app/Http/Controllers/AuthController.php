@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Kreait\Firebase\Auth\SignIn\FailedToSignIn;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -25,38 +27,52 @@ class AuthController extends Controller
         ]);
 
         try {
-            // Use Firebase Service for authentication
             $firebase = app(\App\Services\FirebaseService::class);
 
-            // For demo - in real app, use Firebase Auth
-            // Get all users from Firebase
-            $users = $firebase->getAllUsers();
+            // 1. Try to authenticate with Firebase Auth
+            try {
+                $signInResult = $firebase->getAuth()->signInWithEmailAndPassword(
+                    $credentials['email'],
+                    $credentials['password']
+                );
 
-            // Check if user exists
-            $authenticatedUser = null;
-            foreach ($users as $uid => $user) {
-                if (isset($user['email']) && $user['email'] === $request->email) {
-                    // In real app, verify password with Firebase Auth
-                    // For demo, we'll accept any password
+                $uid = $signInResult->firebaseUserId();
+
+                // 2. Get user data from database
+                $userRef = $firebase->getDatabase()->getReference('users/' . $uid);
+                $userData = $userRef->getValue();
+
+                if ($userData) {
                     $authenticatedUser = [
                         'uid' => $uid,
-                        'email' => $user['email'],
-                        'name' => $user['name'] ?? 'User',
-                        'role' => $user['role'] ?? 'employee',
-                        'employee_id' => $user['employee_id'] ?? null
+                        'email' => $userData['email'],
+                        'name' => $userData['name'] ?? 'User',
+                        'role' => $userData['role'] ?? 'employee',
+                        'employee_id' => $userData['employee_id'] ?? null,
+                        'companyId' => $userData['companyId'] ?? null
                     ];
-                    break;
+
+                    session(['user' => $authenticatedUser]);
+
+                    // Log login activity
+                    $firebase->getDatabase()
+                        ->getReference('login_logs/' . $uid . '/' . time())
+                        ->set([
+                            'email' => $credentials['email'],
+                            'ip' => $request->ip(),
+                            'user_agent' => $request->header('User-Agent'),
+                            'timestamp' => now()->toISOString()
+                        ]);
+
+                    return redirect()->route('dashboard')->with('success', 'Login successful!');
                 }
+
+            } catch (FailedToSignIn $e) {
+                // Firebase auth failed, try demo users as fallback
+                Log::warning('Firebase auth failed: ' . $e->getMessage());
             }
 
-            if ($authenticatedUser) {
-                // Store user in session
-                session(['user' => $authenticatedUser]);
-
-                return redirect()->route('dashboard')->with('success', 'Login successful!');
-            }
-
-            // Fallback to demo users (for testing)
+            // Fallback to demo users (for testing or admin accounts)
             $demoUsers = [
                 'admin@company.com' => [
                     'uid' => 'admin_uid_123',
@@ -81,22 +97,6 @@ class AuthController extends Controller
                     'role' => 'employee',
                     'employee_id' => 'emp_003',
                     'password' => 'password123'
-                ],
-                'najwan@company.com' => [
-                    'uid' => 'user_najwan',
-                    'name' => 'NajwanCF',
-                    'email' => 'najwan@company.com',
-                    'role' => 'employee',
-                    'employee_id' => '-Ogk_zl5rnzcdBcV7Jav',
-                    'password' => 'password123'
-                ],
-                'budi@company.com' => [
-                    'uid' => 'user_budi',
-                    'name' => 'Budi Setiawan',
-                    'email' => 'budi@company.com',
-                    'role' => 'employee',
-                    'employee_id' => 'emp_001',
-                    'password' => 'password123'
                 ]
             ];
 
@@ -105,7 +105,6 @@ class AuthController extends Controller
                 unset($user['password']);
 
                 session(['user' => $user]);
-
                 return redirect()->route('dashboard')->with('success', 'Login successful!');
             }
 
@@ -114,8 +113,9 @@ class AuthController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            Log::error('Login error: ' . $e->getMessage());
             return back()->withErrors([
-                'email' => 'Login error: ' . $e->getMessage(),
+                'email' => 'Login error. Please try again.',
             ]);
         }
     }

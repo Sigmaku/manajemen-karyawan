@@ -20,36 +20,89 @@ class LeaveController extends Controller
     public function index(Request $request)
     {
         try {
-            $leaves = $this->firebase->getAllLeaves();
-            $employees = $this->firebase->getCompanyEmployees();
+            // Ambil semua leave perusahaan (array: leaveId => data)
+            $rawLeaves = $this->firebase->getAllLeaves(); // return array atau []
 
-            // Filter by status
-            $status = $request->get('status');
-            if ($status && $status !== 'all') {
-                $leaves = array_filter($leaves, function($leave) use ($status) {
-                    return ($leave['status'] ?? 'pending') === $status;
-                });
+            // Jika tidak ada data, return empty collection
+            if (empty($rawLeaves)) {
+                $rawLeaves = [];
             }
 
-            // Filter by employee
+            // Ubah menjadi Collection of objects + mapping field sesuai data Firebase
+            $leavesCollection = collect($rawLeaves)->map(function ($leave, $leaveId) {
+                return (object) [
+                    'id'              => $leaveId,
+                    'employeeId'      => $leave['employeeId'] ?? null,
+                    'leave_type'      => $leave['type'] ?? 'annual',
+                    'start_date'      => $leave['startDate'] ?? null,
+                    'end_date'        => $leave['endDate'] ?? null,
+                    'reason'          => $leave['reason'] ?? '-',
+                    'status'          => $leave['status'] ?? 'pending',
+                    'created_at'      => \Carbon\Carbon::parse($leave['createdAt'] ?? now()),
+                    'approved_by'     => $leave['approvedBy'] ?? null,
+                    'rejection_reason' => $leave['rejectionReason'] ?? null,
+                    'contact_during_leave' => $leave['contactDuringLeave'] ?? '-',
+                ];
+            });
+
+            // Filter berdasarkan status
+            $status = $request->get('status', 'all');
+            if ($status !== 'all') {
+                $leavesCollection = $leavesCollection->where('status', $status);
+            }
+
+            // Filter berdasarkan karyawan
             $employeeId = $request->get('employee_id');
             if ($employeeId) {
-                $leaves = array_filter($leaves, function($leave) use ($employeeId) {
-                    return $leave['employeeId'] === $employeeId;
-                });
+                $leavesCollection = $leavesCollection->where('employeeId', $employeeId);
             }
 
-            return view('leaves.index', compact('leaves', 'employees', 'status', 'employeeId'));
+            // Urutkan dari yang terbaru
+            $leavesCollection = $leavesCollection->sortByDesc('created_at');
 
+            // Ambil data semua karyawan perusahaan
+            $employees = $this->firebase->getCompanyEmployees(); // array: empId => data
+
+            // Tambahkan nama dan departemen ke setiap leave
+            $leavesCollection = $leavesCollection->map(function ($leave) use ($employees) {
+                $emp = $employees[$leave->employeeId] ?? null;
+
+                $leave->employee_name       = $emp['name'] ?? 'Karyawan Tidak Diketahui';
+                $leave->employee_department = $emp['department'] ?? '-';
+                $leave->employee_phone      = $emp['phone'] ?? '-';
+
+                return $leave;
+            });
+
+            // Pagination Laravel (bisa pakai {{ $leaves->links() }} di Blade)
+            $perPage = 10;
+            $currentPage = $request->input('page', 1);
+            $paginatedItems = $leavesCollection->forPage($currentPage, $perPage)->values();
+
+            $leaves = new \Illuminate\Pagination\LengthAwarePaginator(
+                $paginatedItems,
+                $leavesCollection->count(),
+                $perPage,
+                $currentPage,
+                [
+                    'path'  => $request->url(),
+                    'query' => $request->query(),
+                ]
+            );
+
+            return view('leaves.index', compact('leaves', 'employees', 'status', 'employeeId'));
         } catch (\Exception $e) {
+            \Log::error('Error di LeaveController@index: ' . $e->getMessage());
+
             return view('leaves.index', [
-                'leaves' => [],
-                'employees' => [],
-                'error' => $e->getMessage()
+                'leaves'      => new \Illuminate\Pagination\LengthAwarePaginator(collect(), 0, 10),
+                'employees'   => [],
+                'status'      => 'all',
+                'employeeId'  => null,
+                'error'       => 'Gagal memuat data pengajuan cuti. Silakan refresh halaman.',
             ]);
         }
     }
-
     public function create()
     {
         $employees = $this->firebase->getCompanyEmployees();
@@ -97,7 +150,6 @@ class LeaveController extends Controller
 
             return redirect()->route('leaves.index')
                 ->with('success', "Leave application submitted successfully! ID: $leaveId");
-
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to submit leave: ' . $e->getMessage())->withInput();
         }
@@ -106,19 +158,69 @@ class LeaveController extends Controller
     public function show($id)
     {
         try {
-            $leave = $this->firebase->getLeave($id);
+            // Ambil data leave mentah dari Firebase (array)
+            $rawLeave = $this->firebase->getLeave($id);
 
-            if (!$leave) {
-                abort(404, 'Leave not found');
+            if (!$rawLeave) {
+                return redirect()->route('leaves.index')
+                    ->with('error', 'Pengajuan cuti tidak ditemukan.');
             }
 
-            $employee = $this->firebase->getEmployee($leave['employeeId']);
+            // Ubah menjadi objek + mapping field sesuai struktur Firebase
+            $leave = (object) [
+                'id'                   => $id,
+                'employeeId'           => $rawLeave['employeeId'] ?? null,
+                'leave_type'           => $rawLeave['type'] ?? 'annual',
+                'start_date'           => $rawLeave['startDate'] ?? null,
+                'end_date'              => $rawLeave['endDate'] ?? null,
+                'reason'               => $rawLeave['reason'] ?? '-',
+                'status'               => $rawLeave['status'] ?? 'pending',
+                'created_at'           => \Carbon\Carbon::parse($rawLeave['createdAt'] ?? now()),
+                'approved_by'          => $rawLeave['approvedBy'] ?? $rawLeave['approved_by'] ?? null,
+                'rejection_reason'     => $rawLeave['rejectionReason'] ?? $rawLeave['rejection_reason'] ?? null,
+                'contact_during_leave' => $rawLeave['contactDuringLeave'] ?? '-',
+            ];
 
-            return view('leaves.show', compact('leave', 'employee'));
+            // Ambil data karyawan
+            $employee = $this->firebase->getEmployee($leave->employeeId);
 
+            if (!$employee) {
+                $employee = [
+                    'name' => 'Karyawan Tidak Diketahui',
+                    'department' => '-',
+                    'phone' => '-'
+                ];
+            }
+
+            // Mapping nama jenis cuti
+            $leaveTypes = [
+                'annual'    => 'Cuti Tahunan',
+                'sick'      => 'Cuti Sakit',
+                'personal'  => 'Cuti Pribadi',
+                'maternity' => 'Cuti Melahirkan',
+                'paternity' => 'Cuti Ayah',
+                'unpaid'    => 'Tanpa Gaji'
+            ];
+            $leaveTypeName = $leaveTypes[$leave->leave_type] ?? 'Cuti Lainnya';
+
+            // Hitung jumlah hari
+            $startDate = \Carbon\Carbon::parse($leave->start_date);
+            $endDate = \Carbon\Carbon::parse($leave->end_date);
+            $days = $startDate->diffInDays($endDate) + 1;
+
+            return view('leaves.show', compact(
+                'leave',
+                'employee',
+                'leaveTypeName',
+                'days',
+                'startDate',
+                'endDate'
+            ));
         } catch (\Exception $e) {
+            \Log::error('Error di LeaveController@show: ' . $e->getMessage());
+
             return redirect()->route('leaves.index')
-                ->with('error', 'Failed to load leave details: ' . $e->getMessage());
+                ->with('error', 'Gagal memuat detail pengajuan cuti.');
         }
     }
 
@@ -136,7 +238,6 @@ class LeaveController extends Controller
 
             return redirect()->back()
                 ->with('success', "Leave approved by $approvedBy");
-
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to approve leave: ' . $e->getMessage());
         }
@@ -160,7 +261,6 @@ class LeaveController extends Controller
 
             return redirect()->back()
                 ->with('success', 'Leave rejected successfully');
-
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to reject leave: ' . $e->getMessage());
         }
@@ -179,7 +279,6 @@ class LeaveController extends Controller
 
             return redirect()->back()
                 ->with('success', 'Leave cancelled successfully');
-
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to cancel leave: ' . $e->getMessage());
         }
@@ -214,7 +313,6 @@ class LeaveController extends Controller
             }
 
             return view('leaves.calendar', compact('calendarEvents'));
-
         } catch (\Exception $e) {
             return view('leaves.calendar', [
                 'calendarEvents' => [],
@@ -237,8 +335,7 @@ class LeaveController extends Controller
             $leaves = $this->firebase->getEmployeeLeaves($employeeId);
             $employee = $this->firebase->getEmployee($employeeId);
 
-            return view('leaves.my-leaves', compact('leaves', 'employee'));
-
+            return view('leaves.my-leaves', compact('leaves', 'employee', 'remainingLeave', 'pendingLeaves', 'approvedLeaves', 'rejectedLeaves'));
         } catch (\Exception $e) {
             return view('leaves.my-leaves', [
                 'leaves' => [],
@@ -287,7 +384,6 @@ class LeaveController extends Controller
                 ],
                 'message' => 'Employee leaves retrieved'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,

@@ -4,7 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Services\FirebaseService;
 use Illuminate\Http\Request;
-use PDF;
+use Illuminate\Support\Carbon;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class ReportController extends Controller
 {
@@ -15,6 +16,9 @@ class ReportController extends Controller
         $this->firebase = $firebase;
     }
 
+    /**
+     * Laporan Absensi Bulanan
+     */
     // Attendance report - VERSI IMPROVED
     public function attendance(Request $request)
     {
@@ -94,165 +98,196 @@ class ReportController extends Controller
         return view('reports.attendance', compact('reportData', 'month', 'department', 'employeeId'));
     }
 
-    // Employee report
+    /**
+     * Laporan Data Karyawan
+     */
     public function employees(Request $request)
     {
-        $db = $this->firebase->getDatabase();
-        $employees = $db->getReference('employees')->getValue() ?: [];
+        try {
+            $employees = $this->firebase->getCompanyEmployees();
 
-        // Department filter
-        $department = $request->get('department');
-        if ($department) {
-            $employees = array_filter($employees, function ($emp) use ($department) {
-                return $emp['department'] == $department;
-            });
-        }
-
-        // Status filter
-        $status = $request->get('status');
-        if ($status) {
-            $employees = array_filter($employees, function ($emp) use ($status) {
-                return $emp['status'] == $status;
-            });
-        }
-
-        // Statistics
-        $total = count($employees);
-        $active = count(array_filter($employees, function ($emp) {
-            return $emp['status'] == 'active';
-        }));
-        $inactive = $total - $active;
-
-        // Group by department
-        $byDepartment = [];
-        foreach ($employees as $emp) {
-            $dept = $emp['department'];
-            if (!isset($byDepartment[$dept])) {
-                $byDepartment[$dept] = 0;
+            // Filter departemen
+            $department = $request->get('department');
+            if ($department) {
+                $employees = array_filter($employees, fn($emp) => ($emp['department'] ?? '') === $department);
             }
-            $byDepartment[$dept]++;
-        }
 
-        if ($request->get('export') == 'pdf') {
-            $pdf = PDF::loadView('reports.employees-pdf', compact('employees', 'total', 'active', 'inactive', 'byDepartment'));
-            return $pdf->download("employee-report-" . date('Y-m-d') . ".pdf");
-        }
+            // Filter status
+            $status = $request->get('status');
+            if ($status) {
+                $employees = array_filter($employees, fn($emp) => ($emp['status'] ?? 'active') === $status);
+            }
 
-        return view('reports.employees', compact('employees', 'total', 'active', 'inactive', 'byDepartment'));
+            // Statistik
+            $total = count($employees);
+            $active = count(array_filter($employees, fn($emp) => ($emp['status'] ?? 'active') === 'active'));
+            $inactive = $total - $active;
+
+            // Group by department
+            $byDepartment = [];
+            foreach ($employees as $emp) {
+                $dept = $emp['department'] ?? 'Tidak Ada Departemen';
+                $byDepartment[$dept] = ($byDepartment[$dept] ?? 0) + 1;
+            }
+
+            if ($request->get('export') === 'pdf') {
+                $pdf = PDF::loadView('reports.employees-pdf', compact(
+                    'employees',
+                    'total',
+                    'active',
+                    'inactive',
+                    'byDepartment'
+                ));
+                return $pdf->download('laporan-karyawan-' . now()->format('Y-m-d') . '.pdf');
+            }
+
+            return view('reports.employees', compact(
+                'employees',
+                'total',
+                'active',
+                'inactive',
+                'byDepartment',
+                'department',
+                'status'
+            ));
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Gagal memuat laporan karyawan.');
+        }
     }
 
-    // Leaves report
+    /**
+     * Laporan Pengajuan Cuti
+     */
     public function leaves(Request $request)
     {
-        $db = $this->firebase->getDatabase();
-        $leaves = $db->getReference('leaves')->getValue() ?: [];
-        $employees = $db->getReference('employees')->getValue() ?: [];
+        try {
+            $allLeaves = $this->firebase->getAllLeaves(); // array: leaveId => data
+            $employees = $this->firebase->getCompanyEmployees();
 
-        // Date range filter
-        $startDate = $request->get('start_date');
-        $endDate = $request->get('end_date');
+            $leaves = $allLeaves ?? [];
 
-        if ($startDate && $endDate) {
-            $leaves = array_filter($leaves, function ($leave) use ($startDate, $endDate) {
-                return $leave['start_date'] >= $startDate && $leave['end_date'] <= $endDate;
-            });
-        }
+            // Filter tanggal
+            $startDate = $request->get('start_date');
+            $endDate   = $request->get('end_date');
 
-        // Status filter
-        $status = $request->get('status');
-        if ($status) {
-            $leaves = array_filter($leaves, function ($leave) use ($status) {
-                return $leave['status'] == $status;
-            });
-        }
-
-        // Calculate statistics
-        $stats = [
-            'total' => count($leaves),
-            'approved' => count(array_filter($leaves, function ($leave) {
-                return $leave['status'] == 'approved';
-            })),
-            'pending' => count(array_filter($leaves, function ($leave) {
-                return $leave['status'] == 'pending';
-            })),
-            'rejected' => count(array_filter($leaves, function ($leave) {
-                return $leave['status'] == 'rejected';
-            }))
-        ];
-
-        // Group by leave type
-        $byType = [];
-        foreach ($leaves as $leave) {
-            $type = $leave['leave_type'];
-            if (!isset($byType[$type])) {
-                $byType[$type] = 0;
+            if ($startDate && $endDate) {
+                $leaves = array_filter($leaves, function ($leave) use ($startDate, $endDate) {
+                    return ($leave['startDate'] ?? $leave['start_date']) >= $startDate &&
+                        ($leave['endDate'] ?? $leave['end_date']) <= $endDate;
+                });
             }
-            $byType[$type]++;
-        }
 
-        if ($request->get('export') == 'pdf') {
-            $pdf = PDF::loadView('reports.leaves-pdf', compact('leaves', 'employees', 'stats', 'byType'));
-            return $pdf->download("leaves-report-" . date('Y-m-d') . ".pdf");
-        }
+            // Filter status
+            $status = $request->get('status');
+            if ($status && $status !== 'all') {
+                $leaves = array_filter($leaves, fn($leave) => ($leave['status'] ?? 'pending') === $status);
+            }
 
-        return view('reports.leaves', compact('leaves', 'employees', 'stats', 'byType'));
+            // Statistik
+            $stats = [
+                'total'    => count($leaves),
+                'approved' => count(array_filter($leaves, fn($l) => $l['status'] ?? '' === 'approved')),
+                'pending'  => count(array_filter($leaves, fn($l) => $l['status'] ?? '' === 'pending')),
+                'rejected' => count(array_filter($leaves, fn($l) => $l['status'] ?? '' === 'rejected')),
+            ];
+
+            // Group by jenis cuti
+            $byType = [];
+            foreach ($leaves as $leave) {
+                $type = $leave['type'] ?? $leave['leave_type'] ?? 'unknown';
+                $byType[$type] = ($byType[$type] ?? 0) + 1;
+            }
+
+            if ($request->get('export') === 'pdf') {
+                $pdf = PDF::loadView('reports.leaves-pdf', compact(
+                    'leaves',
+                    'employees',
+                    'stats',
+                    'byType'
+                ));
+                return $pdf->download('laporan-cuti-' . now()->format('Y-m-d') . '.pdf');
+            }
+
+            return view('reports.leaves', compact(
+                'leaves',
+                'employees',
+                'stats',
+                'byType',
+                'startDate',
+                'endDate',
+                'status'
+            ));
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Gagal memuat laporan cuti.');
+        }
     }
 
-    // Dashboard analytics
+    /**
+     * Dashboard Analytics (Grafik & Tren)
+     */
     public function analytics()
     {
-        $db = $this->firebase->getDatabase();
+        try {
+            // Tren absensi 6 bulan terakhir
+            $months = [];
+            $attendanceRates = [];
 
-        // Monthly attendance trend
-        $months = [];
-        $attendanceData = [];
-        for ($i = 5; $i >= 0; $i--) {
-            $month = date('Y-m', strtotime("-$i months"));
-            $months[] = date('M Y', strtotime($month));
+            for ($i = 5; $i >= 0; $i--) {
+                $date = now()->subMonths($i);
+                $yearMonth = $date->format('Y-m');
+                $months[] = $date->format('M Y');
 
-            $attendance = $db->getReference("attendances/$month")->getValue() ?: [];
-            $totalDays = 0;
-            $presentDays = 0;
+                $rawAttendance = $this->firebase->getAttendanceByMonth($yearMonth);
+                $totalDays = 0;
+                $presentDays = 0;
 
-            foreach ($attendance as $empDays) {
-                foreach ($empDays as $day) {
-                    $totalDays++;
-                    if ($day['status'] == 'present') {
-                        $presentDays++;
+                if ($rawAttendance) {
+                    foreach ($rawAttendance as $dayData) {
+                        foreach ($dayData as $empData) {
+                            $totalDays++;
+                            if (($empData['status'] ?? 'absent') === 'present') {
+                                $presentDays++;
+                            }
+                        }
                     }
                 }
+
+                $rate = $totalDays > 0 ? round(($presentDays / $totalDays) * 100, 2) : 0;
+                $attendanceRates[] = $rate;
             }
 
-            $attendanceData[] = $totalDays > 0 ? round(($presentDays / $totalDays) * 100, 2) : 0;
-        }
-
-        // Department distribution
-        $employees = $db->getReference('employees')->getValue() ?: [];
-        $deptDistribution = [];
-        foreach ($employees as $emp) {
-            $dept = $emp['department'];
-            if (!isset($deptDistribution[$dept])) {
-                $deptDistribution[$dept] = 0;
+            // Distribusi departemen
+            $employees = $this->firebase->getCompanyEmployees();
+            $deptDistribution = [];
+            foreach ($employees as $emp) {
+                $dept = $emp['department'] ?? 'Lainnya';
+                $deptDistribution[$dept] = ($deptDistribution[$dept] ?? 0) + 1;
             }
-            $deptDistribution[$dept]++;
-        }
 
-        // Leave type distribution
-        $leaves = $db->getReference('leaves')->getValue() ?: [];
-        $leaveDistribution = [];
-        foreach ($leaves as $leave) {
-            $type = $leave['leave_type'];
-            if (!isset($leaveDistribution[$type])) {
-                $leaveDistribution[$type] = 0;
+            // Distribusi jenis cuti
+            $leaves = $this->firebase->getAllLeaves();
+            $leaveDistribution = [];
+            foreach ($leaves as $leave) {
+                $type = $leave['type'] ?? 'unknown';
+                $leaveDistribution[$type] = ($leaveDistribution[$type] ?? 0) + 1;
             }
-            $leaveDistribution[$type]++;
-        }
 
-        return view('reports.analytics', compact(
-            'months',
-            'attendanceData',
-            'deptDistribution',
-            'leaveDistribution'
-        ));
+            return view('reports.analytics', compact(
+                'months',
+                'attendanceRates',
+                'deptDistribution',
+                'leaveDistribution'
+            ));
+        } catch (\Exception $e) {
+            \Log::error('Analytics Report Error: ' . $e->getMessage());
+            return view('reports.analytics', [
+                'months'            => [],
+                'attendanceRates'   => [],
+                'deptDistribution'  => [],
+                'leaveDistribution' => [],
+            ])->with('error', 'Gagal memuat data analytics.');
+        }
     }
+
+    // Export methods bisa ditambahkan terpisah jika perlu
 }
