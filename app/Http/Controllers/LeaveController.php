@@ -188,41 +188,79 @@ class LeaveController extends Controller
         return view('leaves.create', compact('employees', 'leaveTypes'));
     }
 
-    public function store(Request $request)
-    {
-        $request->validate([
-            'employee_id'          => 'required|string',
-            'leave_type'           => 'required|string|in:annual,sick,personal,maternity,paternity,unpaid',
-            'start_date'           => 'required|date',
-            'end_date'             => 'required|date|after_or_equal:start_date',
-            'reason'               => 'required|string|max:500',
-            'contact_during_leave' => 'nullable|string|max:255'
-        ]);
+public function store(Request $request)
+{
+    // ================= VALIDATION =================
+    $request->validate([
+        'employee_id'          => 'required|string',
+        'leave_type'           => 'required|string|in:annual,sick,personal,maternity,paternity,unpaid',
+        'start_date'           => 'required|date',
+        'end_date'             => 'required|date|after_or_equal:start_date',
+        'reason'               => 'required|string|max:500',
+        'contact_during_leave' => 'nullable|string|max:255',
+    ]);
 
-        try {
-            $employee = $this->firebase->getEmployee($request->employee_id);
-            if (!$employee) {
-                return back()->with('error', 'Karyawan tidak ditemukan.')->withInput();
+    try {
+        // ================= CEK KARYAWAN =================
+        $employee = $this->firebase->getEmployee($request->employee_id);
+        if (!$employee) {
+            return back()
+                ->with('error', 'Karyawan tidak ditemukan.')
+                ->withInput();
+        }
+
+        // ================= CEK BENTROK CUTI =================
+        // Ambil semua cuti milik karyawan
+        $existingLeaves = $this->firebase->getEmployeeLeaves($request->employee_id) ?? [];
+
+        $newStart = \Carbon\Carbon::parse($request->start_date)->startOfDay();
+        $newEnd   = \Carbon\Carbon::parse($request->end_date)->endOfDay();
+
+        foreach ($existingLeaves as $leave) {
+            // HANYA cek cuti yang SUDAH DISETUJUI
+            if (($leave['status'] ?? 'pending') !== 'approved') {
+                continue;
             }
 
-            $leaveData = [
-                'employee_id'          => $request->employee_id,
-                'leave_type'           => $request->leave_type,
-                'start_date'           => $request->start_date,
-                'end_date'             => $request->end_date,
-                'reason'               => $request->reason,
-                'contact_during_leave' => $request->contact_during_leave ?? '-',
-            ];
+            $existingStart = \Carbon\Carbon::parse($leave['startDate'])->startOfDay();
+            $existingEnd   = \Carbon\Carbon::parse($leave['endDate'])->endOfDay();
 
-            $leaveId = $this->firebase->createLeave($leaveData);
-
-            return redirect()
-                ->route(session('user')['role'] === 'employee' ? 'leaves.my' : 'leaves.index')
-                ->with('success', "Pengajuan cuti berhasil diajukan! ID: $leaveId");
-        } catch (\Exception $e) {
-            return back()->with('error', 'Gagal mengajukan cuti: ' . $e->getMessage())->withInput();
+            // Jika tanggal bentrok → TOLAK
+            if ($newStart->lte($existingEnd) && $newEnd->gte($existingStart)) {
+                return back()
+                    ->with('error', 'Pengajuan cuti gagal. Anda sudah memiliki cuti yang disetujui pada tanggal tersebut.')
+                    ->withInput();
+            }
         }
+
+        // ================= SIMPAN CUTI =================
+        $leaveData = [
+            'employee_id'          => $request->employee_id,
+            'leave_type'           => $request->leave_type,
+            'start_date'           => $request->start_date,
+            'end_date'             => $request->end_date,
+            'reason'               => $request->reason,
+            'contact_during_leave' => $request->contact_during_leave ?? '-',
+            'status'               => 'pending',
+            'created_at'           => now()->toDateTimeString(),
+        ];
+
+        $leaveId = $this->firebase->createLeave($leaveData);
+
+        // ================= REDIRECT =================
+        return redirect()
+            ->route(session('user')['role'] === 'employee' ? 'leaves.my' : 'leaves.index')
+            ->with('success', 'Pengajuan cuti berhasil diajukan dan menunggu persetujuan.');
+
+    } catch (\Exception $e) {
+        \Log::error('LeaveController@store error: ' . $e->getMessage());
+
+        return back()
+            ->with('error', 'Terjadi kesalahan saat mengajukan cuti. Silakan coba lagi.')
+            ->withInput();
     }
+}
+
 
     public function show($id)
     {
