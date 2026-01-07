@@ -47,6 +47,7 @@ class LeaveController extends Controller
 
                 return (object) [
                     'id'                   => $leaveId,
+                    'employeeId'           => $leave['employeeId'] ?? null,
                     'leave_type'           => $leave['type'] ?? 'annual',
                     'start_date'           => $leave['startDate'] ?? null,
                     'end_date'             => $leave['endDate'] ?? null,
@@ -144,6 +145,7 @@ class LeaveController extends Controller
 
             return (object) [
                 'id'                   => $leaveId,
+                'employeeId'           => $leave['employeeId'] ?? null,
                 'leave_type'           => $leave['type'] ?? 'annual',
                 'start_date'           => $leave['startDate'] ?? null,
                 'end_date'             => $leave['endDate'] ?? null,
