@@ -88,20 +88,20 @@
                     <tbody>
                         @forelse($leaves as $leave)
                             @php
-                                $createdAt = $leave->created_at;
-                                $startDate = \Carbon\Carbon::parse($leave->start_date);
-                                $endDate = \Carbon\Carbon::parse($leave->end_date);
-                                $days = $startDate->diffInDays($endDate) + 1;
+    $createdAt = $leave->created_at;
+    $startDate = \Carbon\Carbon::parse($leave->start_date);
+    $endDate = \Carbon\Carbon::parse($leave->end_date);
 
-                                $leaveTypeName = [
-                                    'annual' => 'Cuti Tahunan',
-                                    'sick' => 'Cuti Sakit',
-                                    'personal' => 'Cuti Pribadi',
-                                    'maternity' => 'Cuti Melahirkan',
-                                    'paternity' => 'Cuti Ayah',
-                                    'unpaid' => 'Cuti Tanpa Gaji'
-                                ][$leave->leave_type] ?? 'Cuti Tahunan';
-                            @endphp
+    $leaveTypeName = [
+        'annual' => 'Cuti Tahunan',
+        'sick' => 'Cuti Sakit',
+        'personal' => 'Cuti Pribadi',
+        'maternity' => 'Cuti Melahirkan',
+        'paternity' => 'Cuti Ayah',
+        'unpaid' => 'Cuti Tanpa Gaji'
+    ][$leave->leave_type] ?? 'Cuti Tahunan';
+@endphp
+
 
                             <tr>
                                 <td class="ps-4">{{ $createdAt->format('d M Y H:i') }}</td>
@@ -113,7 +113,8 @@
                                     <br>
                                     {{ $endDate->format('d M Y') }}
                                 </td>
-                                <td>{{ $days }} Hari</td>
+                                <td>{{ $leave->days }} Hari</td>
+
                                 <td>
                                     @switch($leave->status)
                                         @case('pending')
