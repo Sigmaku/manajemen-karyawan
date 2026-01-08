@@ -8,6 +8,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
+use Illuminate\Support\Facades\Log;
 
 class LeaveController extends Controller
 {
@@ -47,6 +48,7 @@ class LeaveController extends Controller
 
                 return (object) [
                     'id'                   => $leaveId,
+                    'employeeId'           => $leave['employeeId'] ?? null,
                     'leave_type'           => $leave['type'] ?? 'annual',
                     'start_date'           => $leave['startDate'] ?? null,
                     'end_date'             => $leave['endDate'] ?? null,
@@ -97,7 +99,7 @@ class LeaveController extends Controller
 
             return view('leaves.index', compact('leaves', 'employees', 'status', 'employeeId'));
         } catch (\Exception $e) {
-            \Log::error('LeaveController@index error: ' . $e->getMessage());
+            Log::error('LeaveController@index error: ' . $e->getMessage());
             return view('leaves.index', [
                 'leaves' => new LengthAwarePaginator(collect(), 0, 10),
                 'employees' => [],
@@ -144,6 +146,7 @@ class LeaveController extends Controller
 
             return (object) [
                 'id'                   => $leaveId,
+                'employeeId'           => $leave['employeeId'] ?? null,
                 'leave_type'           => $leave['type'] ?? 'annual',
                 'start_date'           => $leave['startDate'] ?? null,
                 'end_date'             => $leave['endDate'] ?? null,
@@ -283,7 +286,7 @@ class LeaveController extends Controller
                 ->route(session('user')['role'] === 'employee' ? 'leaves.my' : 'leaves.index')
                 ->with('success', 'Pengajuan cuti berhasil diajukan dan menunggu persetujuan.');
         } catch (\Exception $e) {
-            \Log::error('LeaveController@store error: ' . $e->getMessage());
+            Log::error('LeaveController@store error: ' . $e->getMessage());
 
             return back()
                 ->with('error', 'Terjadi kesalahan saat mengajukan cuti. Silakan coba lagi.')
@@ -363,7 +366,7 @@ class LeaveController extends Controller
                 'role'  // ← PENTING: agar tidak error undefined $role di view
             ));
         } catch (\Exception $e) {
-            \Log::error('LeaveController@show error: ' . $e->getMessage() . ' | Leave ID: ' . $id);
+            Log::error('LeaveController@show error: ' . $e->getMessage() . ' | Leave ID: ' . $id);
 
             return redirect()->back()->with('error', 'Gagal memuat detail pengajuan cuti. Silakan coba lagi.');
         }
