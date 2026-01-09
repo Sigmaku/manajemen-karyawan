@@ -164,9 +164,10 @@ class LeaveController extends Controller
         $approvedLeaves = $leavesCollection->where('status', 'approved')->count();
         $rejectedLeaves = $leavesCollection->where('status', 'rejected')->count();
 
+        $quotaTypes =['annual','personal'];
         // Hitung sisa cuti tahunan (contoh: kuota 12 hari)
         $usedAnnualDays = $leavesCollection
-            ->where('leave_type', 'annual')
+            ->where('leave_type', $quotaTypes)
             ->where('status', 'approved')
             ->sum(function ($leave) {
                 return $this->countWorkingDays(
@@ -199,6 +200,68 @@ class LeaveController extends Controller
             'rejectedLeaves'
         ));
     }
+    public function apiMyLeaves()
+    {
+        $user = session('user');
+        $employeeId = $user['employee_id'] ?? null;
+
+        if (!$employeeId) {
+            return response()->json(['success' => false, 'message' => 'Employee ID not found'], 401);
+        }
+
+        $rawLeaves = $this->firebase->getEmployeeLeaves($employeeId) ?? [];
+
+        // Normalisasi + hitung hari kerja (sesuai logika kamu)
+        $items = collect($rawLeaves)->map(function ($leave, $leaveId) {
+            $start = $leave['startDate'] ?? null;
+            $end   = $leave['endDate'] ?? null;
+
+            $days = 0;
+            if ($start && $end) {
+                $days = $this->countWorkingDays($start, $end);
+            }
+
+            $createdAt = $leave['createdAt'] ?? now()->toISOString();
+
+            return [
+                'id' => $leaveId,
+                'type' => $leave['type'] ?? 'annual',
+                'startDate' => $start,
+                'endDate' => $end,
+                'status' => $leave['status'] ?? 'pending',
+                'createdAt' => $createdAt,
+                'days' => $days,
+            ];
+        })
+            ->sortByDesc(function ($x) {
+                // sorting aman walau createdAt beda format
+                try {
+                    return \Carbon\Carbon::parse($x['createdAt'])->timestamp;
+                } catch (\Exception $e) {
+                    return 0;
+                }
+            })
+            ->values();
+
+        // Summary
+        $pending  = $items->where('status', 'pending')->count();
+        $approved = $items->where('status', 'approved')->count();
+        $rejected = $items->where('status', 'rejected')->count();
+
+        // Ambil 10 terbaru untuk tabel realtime
+        $latest = $items->take(10)->values();
+
+        return response()->json([
+            'success' => true,
+            'summary' => [
+                'pending' => $pending,
+                'approved' => $approved,
+                'rejected' => $rejected,
+            ],
+            'items' => $latest,
+        ]);
+    }
+
 
     public function create()
     {

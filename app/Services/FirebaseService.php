@@ -93,7 +93,6 @@ class FirebaseService
             Log::info("Auth user created: $uid for employee: " . $userData['employee_id']);
 
             return $uid;
-
         } catch (\Exception $e) {
             Log::error('Create auth user error: ' . $e->getMessage());
             throw $e;
@@ -193,7 +192,6 @@ class FirebaseService
 
             Log::info("Employee created: $employeeId");
             return $employeeId;
-
         } catch (\Exception $e) {
             Log::error('Firebase createEmployee error: ' . $e->getMessage());
             throw $e;
@@ -218,7 +216,6 @@ class FirebaseService
 
             Log::info("Employee updated: $employeeId");
             return true;
-
         } catch (\Exception $e) {
             Log::error('Firebase updateEmployee error: ' . $e->getMessage());
             throw $e;
@@ -250,7 +247,6 @@ class FirebaseService
 
             Log::info("Employee deleted: $employeeId");
             return true;
-
         } catch (\Exception $e) {
             Log::error('Firebase deleteEmployee error: ' . $e->getMessage());
             throw $e;
@@ -307,24 +303,33 @@ class FirebaseService
     {
         try {
             $date = date('Y-m-d');
-            $time = date('H:i');
 
+            // pakai waktu dari controller kalau dikirim, kalau tidak pakai server time
+            $time = $data['checkIn'] ?? date('H:i');
+
+            $officeStart = \Carbon\Carbon::parse($date . ' 08:00');
+            $checkInTime = \Carbon\Carbon::parse($date . ' ' . $time);
+
+            $isLate = $checkInTime->gt($officeStart);
+            $lateMinutes = $isLate ? $officeStart->diffInMinutes($checkInTime) : 0;
+
+            // Struktur tetap sama + boleh tambah hoursWorked/lateMinutes (tidak mengubah struktur inti)
             $attendanceData = [
-                'checkIn' => $time,
-                'checkOut' => null,
-                'location' => $data['location'] ?? 'Office',
-                'notes' => $data['notes'] ?? '',
-                'overtime' => 0,
-                'status' => 'present',
-                'timestamp' => now()->toISOString()
+                'checkIn'     => $time,
+                'checkOut'    => null,
+                'location'    => $data['location'] ?? 'Office',
+                'notes'       => $data['notes'] ?? '',
+                'hoursWorked' => 0,
+                'overtime'    => 0,
+                'lateMinutes' => $lateMinutes,
+                'status'      => $isLate ? 'late' : 'present',
+                'timestamp'   => $data['checkedInAt'] ?? now()->toISOString(),
             ];
 
-            // Save attendance
             $this->database
                 ->getReference("attendances/{$this->companyId}/{$date}/{$employeeId}")
                 ->set($attendanceData);
 
-            // Update live status
             $this->database
                 ->getReference("liveStatus/{$this->companyId}/{$employeeId}")
                 ->set([
@@ -334,12 +339,13 @@ class FirebaseService
 
             Log::info("Check-in recorded for employee: $employeeId");
             return $attendanceData;
-
         } catch (\Exception $e) {
             Log::error('Firebase recordCheckIn error: ' . $e->getMessage());
             throw $e;
         }
     }
+
+
 
     public function recordCheckOut($employeeId)
     {
@@ -347,35 +353,70 @@ class FirebaseService
             $date = date('Y-m-d');
             $time = date('H:i');
 
-            // Get current attendance
             $attendanceRef = $this->database
                 ->getReference("attendances/{$this->companyId}/{$date}/{$employeeId}");
 
             $attendance = $attendanceRef->getValue();
 
-            if (!$attendance) {
+            if (!$attendance || empty($attendance['checkIn'])) {
                 Log::warning("No check-in found for employee: $employeeId on $date");
                 return false;
             }
 
-            // Update checkout time
-            $attendance['checkOut'] = $time;
-            $attendance['updatedAt'] = now()->toISOString();
+            $checkInTime  = \Carbon\Carbon::parse($date . ' ' . $attendance['checkIn']);
+            $checkOutTime = \Carbon\Carbon::parse($date . ' ' . $time);
 
-            // Calculate hours worked
-            if ($attendance['checkIn']) {
-                $checkIn = \Carbon\Carbon::createFromFormat('Y-m-d H:i', $date . ' ' . $attendance['checkIn']);
-                $checkOut = \Carbon\Carbon::createFromFormat('Y-m-d H:i', $date . ' ' . $time);
-                $hoursWorked = $checkOut->diffInHours($checkIn);
-                $attendance['hoursWorked'] = $hoursWorked;
-
-                // Calculate overtime (if worked more than 8 hours)
-                if ($hoursWorked > 8) {
-                    $attendance['overtime'] = $hoursWorked - 8;
-                }
+            // Guard: kalau checkout < checkin
+            if ($checkOutTime->lt($checkInTime)) {
+                Log::warning("Invalid checkout (before checkin) for employee: $employeeId on $date");
+                return false;
             }
 
-            $attendanceRef->update($attendance);
+            // Jam kantor
+            $officeStart   = \Carbon\Carbon::parse($date . ' 08:00');
+            $officeEnd     = \Carbon\Carbon::parse($date . ' 16:00');
+            $overtimeStart = \Carbon\Carbon::parse($date . ' 18:00');
+
+            // 1) late minutes
+            $lateMinutes = 0;
+            if ($checkInTime->gt($officeStart)) {
+                $lateMinutes = $officeStart->diffInMinutes($checkInTime);
+            }
+
+            // 2) hoursWorked normal (08:00-16:00)
+            $normalStart = $checkInTime->lt($officeStart) ? $officeStart : $checkInTime;
+            $normalEnd   = $checkOutTime->gt($officeEnd) ? $officeEnd : $checkOutTime;
+
+            $normalWorkedMinutes = 0;
+            if ($normalEnd->gt($normalStart)) {
+                $normalWorkedMinutes = $normalStart->diffInMinutes($normalEnd);
+            }
+
+            $hoursWorked = round($normalWorkedMinutes / 60, 2);
+
+            // 3) overtime hanya mulai 18:00
+            $overtimeMinutes = 0;
+            if ($checkOutTime->gt($overtimeStart)) {
+                $overtimeMinutes = $overtimeStart->diffInMinutes($checkOutTime);
+            }
+
+            $overtime = round($overtimeMinutes / 60, 2);
+
+            // 4) update attendance
+            $updateData = [
+                'checkOut'     => $time,
+                'hoursWorked'  => $hoursWorked,
+                'overtime'     => $overtime,
+                'lateMinutes'  => $lateMinutes,
+                'updatedAt'    => now()->toISOString(),
+            ];
+
+            // Optional: status tetap late/present dari check-in, tapi kalau belum ada kita set
+            if (!isset($attendance['status'])) {
+                $updateData['status'] = ($lateMinutes > 0) ? 'late' : 'present';
+            }
+
+            $attendanceRef->update($updateData);
 
             // Update live status
             $this->database
@@ -385,14 +426,14 @@ class FirebaseService
                     'lastUpdate' => date('Y-m-d H:i:s')
                 ]);
 
-            Log::info("Check-out recorded for employee: $employeeId");
-            return $attendance;
-
+            // Return merged result
+            return array_merge($attendance, $updateData);
         } catch (\Exception $e) {
             Log::error('Firebase recordCheckOut error: ' . $e->getMessage());
             throw $e;
         }
     }
+
 
     // Tambahkan method ini di FirebaseService.php
 
@@ -510,10 +551,11 @@ class FirebaseService
                 'reason' => $data['reason'],
                 'contactDuringLeave' => $data['contact_during_leave'] ?? '',
                 'status' => 'pending',
-                'createdAt' => date('Y-m-d'),
-                'appliedDate' => now()->toISOString(),
+                'createdAt' => now()->toISOString(),      // ✅ FIX
+                'appliedDate' => now()->toISOString(),    // ✅ FIX (opsional)
                 'approvedBy' => null
             ];
+
 
             $this->database
                 ->getReference("leaveRequests/{$this->companyId}/{$leaveId}")
@@ -521,7 +563,6 @@ class FirebaseService
 
             Log::info("Leave created: $leaveId");
             return $leaveId;
-
         } catch (\Exception $e) {
             Log::error('Firebase createLeave error: ' . $e->getMessage());
             throw $e;
@@ -683,7 +724,6 @@ class FirebaseService
             Log::info("Password reset for user: $uid");
 
             return $newPassword;
-
         } catch (\Exception $e) {
             Log::error('Reset password error: ' . $e->getMessage());
             throw $e;
@@ -708,7 +748,6 @@ class FirebaseService
             Log::info("Email updated for user: $uid");
 
             return true;
-
         } catch (\Exception $e) {
             Log::error('Update email error: ' . $e->getMessage());
             throw $e;
@@ -717,9 +756,6 @@ class FirebaseService
 
     // Tambahkan method ini di FirebaseService.php
 
-/**
- * Get live employee status
- */
     public function getEmployeeLiveStatus($employeeId)
     {
         try {
@@ -740,16 +776,13 @@ class FirebaseService
             }
 
             return ['status' => 'offline', 'last_update' => null];
-
+            Log::error('Get employee live status error: ' . $e->getMessage());
+            return ['status' => 'error', 'last_update' => null];
         } catch (\Exception $e) {
             Log::error('Get employee live status error: ' . $e->getMessage());
             return ['status' => 'error', 'last_update' => null];
         }
     }
-
-    /**
-     * Update live status
-     */
     public function updateLiveStatus($employeeId, $status, $data = [])
     {
         try {
@@ -768,10 +801,17 @@ class FirebaseService
                 ->set($updateData);
 
             return true;
-
         } catch (\Exception $e) {
             Log::error('Update live status error: ' . $e->getMessage());
             return false;
         }
+    }
+    public function updateAttendance($employeeId, array $data)
+    {
+        $date = date('Y-m-d');
+
+        $this->database
+            ->getReference("attendances/{$this->companyId}/$date/$employeeId")
+            ->update($data);
     }
 }

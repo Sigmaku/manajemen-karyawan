@@ -116,7 +116,7 @@
                         </div>
                         <div class="col-md-6">
                             <strong class="text-muted">Diajukan Pada</strong>
-                            <p class="mb-0 fs-5">{{ $leave->created_at->format('d F Y H:i') }}</p>
+                            <p class="mb-0 fs-5">{{ $leave->created_at->format('d F Y ') }}</p>
                         </div>
                     </div>
                 </div>
