@@ -18,143 +18,270 @@ class ReportController extends Controller
     }
 
     /**
-     * Laporan Absensi Bulanan
+     * Laporan Absensi Bulanan - SIMPLE VERSION
      */
-    // Attendance report - VERSI IMPROVED
     public function attendance(Request $request)
     {
-        $month = $request->get('month', date('Y-m')); // contoh: 2026-01
+        $month = $request->get('month', date('Y-m'));
         $department = $request->get('department');
-        $employeeId = $request->get('employee_id'); // filter per karyawan
+        $employeeId = $request->get('employee_id');
 
-        $db = $this->firebase->getDatabase();
+        // Ambil data
+        $employees = $this->firebase->getCompanyEmployees();
+        $attendanceData = $this->firebase->getAttendanceByMonth($month);
+        $allLeavesData = $this->firebase->getAllLeaves() ?? [];
 
-        // Ambil data employees
-        $employeesRef = $db->getReference('employees')->getValue() ?: [];
-
-        // Ambil data attendance bulan tersebut
-        $attendanceRef = $db->getReference("attendances/$month")->getValue() ?: [];
-
-        // Filter employees berdasarkan department
-        $employees = $employeesRef;
+        // Filter employees
         if ($department) {
             $employees = array_filter($employees, fn($emp) => ($emp['department'] ?? '') === $department);
+        }
+
+        if ($employeeId) {
+            $employees = array_filter($employees, fn($emp) => ($emp['id'] ?? '') == $employeeId);
         }
 
         $reportData = [];
 
         foreach ($employees as $empId => $emp) {
-            // Kalau ada filter employee_id, skip yang bukan target
-            if ($employeeId && $empId !== $employeeId) {
-                continue;
-            }
+            // 1. Data cuti approved untuk employee ini
+            $leaveDates = $this->getEmployeeLeaveDates($empId, $allLeavesData);
 
-            $days = $attendanceRef[$empId] ?? [];
-            $details = []; // untuk detail harian di view
+            // 2. Data attendance untuk employee ini
+            $attendanceDates = $this->getEmployeeAttendanceDates($empId, $attendanceData);
+
+            // 3. Generate semua hari kerja dalam bulan
+            $workingDays = $this->generateWorkingDays($month);
+
+            // 4. Urutkan working days dari yang terbaru ke terlama
+            rsort($workingDays);
+
+            $details = [];
             $stats = [
                 'present' => 0,
                 'late' => 0,
                 'leave' => 0,
-                'sick' => 0,
-                'permission' => 0,
                 'absent' => 0,
             ];
 
-            foreach ($days as $date => $day) {
-                $status = $day['status'] ?? 'absent'; // fallback absent
-                $stats[$status] = ($stats[$status] ?? 0) + 1;
+            // 5. VARIABLE TRACKING: Simpan status terakhir yang diketahui
+            $foundRecentStatus = false;
 
+            // 6. Loop dari hari TERBARU ke TERLAMA
+            foreach ($workingDays as $date) {
+                $carbonDate = Carbon::parse($date);
+
+                // Tentukan status untuk hari ini
+                $status = $this->determineDayStatus(
+                    $date,
+                    $empId,
+                    $attendanceDates,
+                    $leaveDates
+                );
+
+                // Jika kita sudah menemukan status sebelumnya (present/late/leave)
+                // DAN hari ini statusnya belum diketahui (unknown)
+                // MAKA hari ini adalah ABSENT
+                if ($foundRecentStatus && $status['type'] === 'unknown') {
+                    $status['type'] = 'absent';
+                    $status['reason'] = 'Tidak hadir';
+                }
+
+                // Jika hari ini statusnya diketahui (bukan unknown), update flag
+                if ($status['type'] !== 'unknown') {
+                    $foundRecentStatus = true;
+                }
+
+                // Hitung stats
+                if (isset($stats[$status['type']])) {
+                    $stats[$status['type']]++;
+                }
+
+                // Simpan detail
                 $details[] = [
-                    'date' => $date, // format YYYY-MM-DD
-                    'status' => ucfirst(str_replace('_', ' ', $status)), // Present, Late, Leave, dll
-                    'reason' => $day['reason'] ?? '-',
-                    'clock_in' => $day['clock_in'] ?? '-',
-                    'clock_out' => $day['clock_out'] ?? '-',
+                    'date' => $date,
+                    'status' => ucfirst($status['type']),
+                    'reason' => $status['reason'],
+                    'clock_in' => $status['clock_in'],
+                    'clock_out' => $status['clock_out'],
                 ];
             }
 
-            $totalDays = count($days);
-            $attendedDays = ($stats['present'] ?? 0) + ($stats['late'] ?? 0); // hadir + telat = masuk
-            $attendanceRate = $totalDays > 0 ? round(($attendedDays / $totalDays) * 100, 2) : 0;
+            // 7. Urutkan detail dari tanggal terlama ke terbaru untuk tampilan
+            usort($details, function($a, $b) {
+                return strcmp($a['date'], $b['date']);
+            });
+
+            // 8. Hitung attendance rate
+            $totalWorkingDays = count($workingDays);
+            $attendedDays = $stats['present'] + $stats['late'];
+            $attendanceRate = $totalWorkingDays > 0 ? round(($attendedDays / $totalWorkingDays) * 100, 2) : 0;
 
             $reportData[$empId] = [
-                'employee' => $emp,
+                'employee' => [
+                    'name' => $emp['name'] ?? 'Unknown',
+                    'department' => $emp['department'] ?? '-',
+                    'id' => $empId,
+                ],
                 'stats' => $stats,
-                'total_days' => $totalDays,
+                'total_working_days' => $totalWorkingDays,
                 'attendance_rate' => $attendanceRate,
-                'details' => $details, // ini yang dipakai di collapse table
+                'details' => $details,
             ];
         }
 
-        // Urutkan reportData berdasarkan nama karyawan (opsional, biar rapi)
+        // Urutkan berdasarkan nama
         uasort($reportData, fn($a, $b) => $a['employee']['name'] <=> $b['employee']['name']);
 
         // Export PDF
         if ($request->get('export') == 'pdf') {
-            $pdf = PDF::loadView('reports.attendance-pdf', compact('reportData', 'month', 'department'));
+            $pdf = PDF::loadView('reports.attendance-pdf', compact('reportData', 'month'));
             return $pdf->download("attendance-report-{$month}.pdf");
         }
 
-        // Return view
         return view('reports.attendance', compact('reportData', 'month', 'department', 'employeeId'));
     }
 
     /**
-     * Laporan Data Karyawan
+     * Tentukan status untuk satu hari
      */
-    public function employees(Request $request)
+    private function determineDayStatus($date, $empId, $attendanceDates, $leaveDates)
+    {
+        // 1. Cek apakah tanggal ini cuti
+        if (in_array($date, $leaveDates)) {
+            return [
+                'type' => 'leave',
+                'reason' => 'Cuti',
+                'clock_in' => '-',
+                'clock_out' => '-',
+            ];
+        }
+
+        // 2. Cek apakah ada attendance data
+        if (isset($attendanceDates[$date])) {
+            $attendance = $attendanceDates[$date];
+            $clockIn = $attendance['checkIn'] ?? $attendance['clock_in'] ?? null;
+            $clockOut = $attendance['checkOut'] ?? $attendance['clock_out'] ?? null;
+
+            $attendanceStatus = strtolower($attendance['status'] ?? 'present');
+
+            // Jika di attendance sudah ada status sakit/izin
+            if ($attendanceStatus !== 'present') {
+                return [
+                    'type' => 'leave',
+                    'reason' => ucfirst($attendanceStatus) . ': ' . ($attendance['notes'] ?? ''),
+                    'clock_in' => $clockIn ?? '-',
+                    'clock_out' => $clockOut ?? '-',
+                ];
+            }
+
+            // Jika present, cek apakah telat
+            if ($clockIn && $this->isLate($clockIn)) {
+                return [
+                    'type' => 'late',
+                    'reason' => $attendance['notes'] ?? 'Telat',
+                    'clock_in' => $clockIn,
+                    'clock_out' => $clockOut ?? '-',
+                ];
+            }
+
+            return [
+                'type' => 'present',
+                'reason' => $attendance['notes'] ?? 'Hadir',
+                'clock_in' => $clockIn ?? '-',
+                'clock_out' => $clockOut ?? '-',
+            ];
+        }
+
+        // 3. Default: unknown (akan diproses nanti)
+        return [
+            'type' => 'unknown',
+            'reason' => 'Belum ada data',
+            'clock_in' => '-',
+            'clock_out' => '-',
+        ];
+    }
+
+    /**
+     * Helper: Ambil semua tanggal cuti untuk employee
+     */
+    private function getEmployeeLeaveDates($empId, $allLeavesData)
+    {
+        $leaveDates = [];
+
+        foreach ($allLeavesData as $leave) {
+            $leaveEmpId = $leave['employeeId'] ?? '';
+            $leaveStatus = $leave['status'] ?? 'pending';
+
+            if ($leaveEmpId === $empId && $leaveStatus === 'approved') {
+                $startDate = $leave['startDate'] ?? null;
+                $endDate = $leave['endDate'] ?? null;
+
+                if ($startDate && $endDate) {
+                    $start = Carbon::parse($startDate);
+                    $end = Carbon::parse($endDate);
+
+                    while ($start->lte($end)) {
+                        // Hanya hari kerja (Senin-Jumat)
+                        if ($start->dayOfWeek >= Carbon::MONDAY && $start->dayOfWeek <= Carbon::FRIDAY) {
+                            $leaveDates[] = $start->format('Y-m-d');
+                        }
+                        $start->addDay();
+                    }
+                }
+            }
+        }
+
+        return array_unique($leaveDates);
+    }
+
+    /**
+     * Helper: Ambil semua tanggal attendance untuk employee
+     */
+    private function getEmployeeAttendanceDates($empId, $attendanceData)
+    {
+        $attendanceDates = [];
+
+        foreach ($attendanceData as $date => $dayData) {
+            if (isset($dayData[$empId])) {
+                $attendanceDates[$date] = $dayData[$empId];
+            }
+        }
+
+        return $attendanceDates;
+    }
+
+    /**
+     * Generate HANYA hari kerja (Senin-Jumat) dalam bulan
+     */
+    private function generateWorkingDays($yearMonth)
+    {
+        $workingDays = [];
+        $date = Carbon::parse($yearMonth . '-01');
+        $endDate = $date->copy()->endOfMonth();
+
+        while ($date->lte($endDate)) {
+            if ($date->dayOfWeek >= Carbon::MONDAY && $date->dayOfWeek <= Carbon::FRIDAY) {
+                $workingDays[] = $date->format('Y-m-d');
+            }
+            $date->addDay();
+        }
+
+        return $workingDays;
+    }
+
+    /**
+     * Cek apakah telat
+     */
+    private function isLate($checkInTime)
     {
         try {
-            $employees = $this->firebase->getCompanyEmployees();
-
-            // Filter departemen
-            $department = $request->get('department');
-            if ($department) {
-                $employees = array_filter($employees, fn($emp) => ($emp['department'] ?? '') === $department);
-            }
-
-            // Filter status
-            $status = $request->get('status');
-            if ($status) {
-                $employees = array_filter($employees, fn($emp) => ($emp['status'] ?? 'active') === $status);
-            }
-
-            // Statistik
-            $total = count($employees);
-            $active = count(array_filter($employees, fn($emp) => ($emp['status'] ?? 'active') === 'active'));
-            $inactive = $total - $active;
-
-            // Group by department
-            $byDepartment = [];
-            foreach ($employees as $emp) {
-                $dept = $emp['department'] ?? 'Tidak Ada Departemen';
-                $byDepartment[$dept] = ($byDepartment[$dept] ?? 0) + 1;
-            }
-
-            if ($request->get('export') === 'pdf') {
-                $pdf = PDF::loadView('reports.employees-pdf', compact(
-                    'employees',
-                    'total',
-                    'active',
-                    'inactive',
-                    'byDepartment'
-                ));
-                return $pdf->download('laporan-karyawan-' . now()->format('Y-m-d') . '.pdf');
-            }
-
-            return view('reports.employees', compact(
-                'employees',
-                'total',
-                'active',
-                'inactive',
-                'byDepartment',
-                'department',
-                'status'
-            ));
+            $checkIn = Carbon::parse($checkInTime);
+            return $checkIn->format('H:i') > '08:15';
         } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Gagal memuat laporan karyawan.');
+            return false;
         }
     }
+
 
     /**
      * Laporan Pengajuan Cuti

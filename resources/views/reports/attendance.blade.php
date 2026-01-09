@@ -60,9 +60,7 @@
                             <th>Departemen</th>
                             <th>Hadir</th>
                             <th>Telat</th>
-                            <th>Cuti</th>
-                            <th>Sakit</th>
-                            <th>Izin</th>
+                            <th>Cuti</th>        <!-- SATU kolom untuk semua cuti -->
                             <th>Absent</th>
                             <th>Rate Hadir (%)</th>
                             <th>Detail Harian</th>
@@ -70,14 +68,14 @@
                     </thead>
                     <tbody>
                         @forelse($reportData as $empId => $data)
+                        <!-- Ganti bagian statistik di body table: -->
                         <tr>
                             <td><strong>{{ $data['employee']['name'] ?? 'Unknown' }}</strong></td>
                             <td>{{ $data['employee']['department'] ?? '-' }}</td>
                             <td><span class="badge bg-success">{{ $data['stats']['present'] ?? 0 }}</span></td>
                             <td><span class="badge bg-info">{{ $data['stats']['late'] ?? 0 }}</span></td>
                             <td><span class="badge bg-warning">{{ $data['stats']['leave'] ?? 0 }}</span></td>
-                            <td><span class="badge bg-warning">{{ $data['stats']['sick'] ?? 0 }}</span></td>
-                            <td><span class="badge bg-warning">{{ $data['stats']['permission'] ?? 0 }}</span></td>
+                            <!-- HAPUS BARIS SICK & PERMISSION -->
                             <td><span class="badge bg-danger">{{ $data['stats']['absent'] ?? 0 }}</span></td>
                             <td><strong>{{ $data['attendance_rate'] }}%</strong></td>
                             <td>

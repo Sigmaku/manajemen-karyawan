@@ -435,6 +435,11 @@ class FirebaseService
     }
 
 
+    // Tambahkan method ini di FirebaseService.php
+
+    /**
+     * Get attendance by month with proper structure
+     */
     public function getAttendanceByMonth($yearMonth)
     {
         try {
@@ -454,6 +459,23 @@ class FirebaseService
             return $monthAttendance;
         } catch (\Exception $e) {
             Log::error('Firebase getAttendanceByMonth error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Get all attendance data for reporting
+     */
+    public function getAllAttendance()
+    {
+        try {
+            $attendance = $this->database
+                ->getReference("attendances/{$this->companyId}")
+                ->getValue();
+
+            return $attendance ?: [];
+        } catch (\Exception $e) {
+            Log::error('Firebase getAllAttendance error: ' . $e->getMessage());
             return [];
         }
     }
@@ -734,9 +756,6 @@ class FirebaseService
 
     // Tambahkan method ini di FirebaseService.php
 
-    /**
-     * Get live employee status
-     */
     public function getEmployeeLiveStatus($employeeId)
     {
         try {
@@ -757,15 +776,13 @@ class FirebaseService
             }
 
             return ['status' => 'offline', 'last_update' => null];
+            Log::error('Get employee live status error: ' . $e->getMessage());
+            return ['status' => 'error', 'last_update' => null];
         } catch (\Exception $e) {
             Log::error('Get employee live status error: ' . $e->getMessage());
             return ['status' => 'error', 'last_update' => null];
         }
     }
-
-    /**
-     * Update live status
-     */
     public function updateLiveStatus($employeeId, $status, $data = [])
     {
         try {
