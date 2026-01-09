@@ -39,7 +39,6 @@ class AttendanceController extends Controller
                 // Get employee data
                 $employee = $this->firebase->getEmployee($employeeId);
                 $allEmployees = $employee ? [$employeeId => $employee] : [];
-
             } else {
                 // Admin/Manager can see all
                 $today = date('Y-m-d');
@@ -60,7 +59,7 @@ class AttendanceController extends Controller
             }
 
             // Sort by check-in time (latest first)
-            usort($attendanceList, function($a, $b) {
+            usort($attendanceList, function ($a, $b) {
                 $timeA = $a['attendance']['checkIn'] ?? '00:00';
                 $timeB = $b['attendance']['checkIn'] ?? '00:00';
                 return strcmp($timeB, $timeA);
@@ -75,7 +74,6 @@ class AttendanceController extends Controller
                 'role' => $role,
                 'currentEmployeeId' => $employeeId
             ]);
-
         } catch (\Exception $e) {
             return view('attendance.dashboard', [
                 'attendanceList' => [],
@@ -101,13 +99,17 @@ class AttendanceController extends Controller
                 ->with('error', 'Only employees can check in/out');
         }
 
+        if (!$employeeId) {
+            return back()->with('error', 'Employee ID not found in session');
+        }
+
         // Auto use logged in employee ID
         $request->merge(['employee_id' => $employeeId]);
 
         $validator = Validator::make($request->all(), [
             'employee_id' => 'required|string',
-            'location' => 'required|string',
-            'notes' => 'nullable|string'
+            'location'    => 'required|string',
+            'notes'       => 'nullable|string'
         ]);
 
         if ($validator->fails()) {
@@ -116,7 +118,6 @@ class AttendanceController extends Controller
 
         try {
             $employee = $this->firebase->getEmployee($employeeId);
-
             if (!$employee) {
                 return back()->with('error', 'Employee not found');
             }
@@ -127,9 +128,26 @@ class AttendanceController extends Controller
                 return back()->with('error', 'Already checked in today');
             }
 
+            // =========================
+            // Time Rules
+            // =========================
+            $today = date('Y-m-d');
+            $checkInTimeStr = now()->format('H:i');
+
+            $officeStart   = \Carbon\Carbon::parse($today . ' 08:00');
+            $checkInCarbon = \Carbon\Carbon::parse($today . ' ' . $checkInTimeStr);
+
+            $isLate = $checkInCarbon->gt($officeStart);
+            $lateMinutes = $isLate ? $officeStart->diffInMinutes($checkInCarbon) : 0;
+
             $attendanceData = [
-                'location' => $request->location ?? 'Office',
-                'notes' => $request->notes ?? ''
+                'checkIn'     => $checkInTimeStr,
+                'location'    => $request->location ?? 'Office',
+                'notes'       => $request->notes ?? '',
+                'isLate'      => $isLate,
+                'lateMinutes' => $lateMinutes,                 // ✅ for dashboard display
+                'status'      => $isLate ? 'late' : 'present', // ✅ for badge
+                'checkedInAt' => now()->toISOString(),         // optional audit field
             ];
 
             $record = $this->firebase->recordCheckIn($employeeId, $attendanceData);
@@ -137,17 +155,18 @@ class AttendanceController extends Controller
             return redirect()->route('attendance.dashboard')
                 ->with('success', 'Check-in recorded successfully!')
                 ->with('checkin_data', [
-                    'employee_id' => $employeeId,
+                    'employee_id'   => $employeeId,
                     'employee_name' => $employee['name'] ?? 'Unknown',
-                        'check_in' => $record['checkIn'],
-                    'location' => $record['location'],
-                    'time' => $record['checkIn']
+                    'check_in'      => $record['checkIn'] ?? $checkInTimeStr,
+                    'location'      => $record['location'] ?? ($request->location ?? 'Office'),
+                    'late'          => $record['isLate'] ?? $isLate,
+                    'late_minutes'  => $record['lateMinutes'] ?? $lateMinutes,
                 ]);
-
         } catch (\Exception $e) {
             return back()->with('error', 'Check-in failed: ' . $e->getMessage());
         }
     }
+
 
     public function checkOut(Request $request)
     {
@@ -155,50 +174,80 @@ class AttendanceController extends Controller
         $role = $user['role'] ?? 'employee';
         $employeeId = $user['employee_id'] ?? null;
 
-        // Only employees can check in/out
+        // (Opsional tapi disarankan) hanya employee boleh checkout
         if ($role !== 'employee') {
-            return redirect()->route('attendance.dashboard')
-                ->with('error', 'Only employees can check in/out');
+            return response()->json([
+                'success' => false,
+                'message' => 'Only employees can check out'
+            ], 403);
         }
 
-        // Auto use logged in employee ID
-        $request->merge(['employee_id' => $employeeId]);
+        $today = date('Y-m-d');
+        $now = now();
 
-        $validator = Validator::make($request->all(), [
-            'employee_id' => 'required|string'
+        $attendance = $this->firebase->getTodayAttendance();
+        if (!isset($attendance[$employeeId]['checkIn'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No check-in found today'
+            ], 400);
+        }
+
+        $checkInTime  = \Carbon\Carbon::parse($today . ' ' . $attendance[$employeeId]['checkIn']);
+        $checkOutTime = $now;
+
+        // Jam kantor
+        $officeStart   = \Carbon\Carbon::parse($today . ' 08:00');
+        $officeEnd     = \Carbon\Carbon::parse($today . ' 16:00');
+        $overtimeStart = \Carbon\Carbon::parse($today . ' 18:00');
+
+        // 1) TELAT (menit)
+        $lateMinutes = 0;
+        if ($checkInTime->greaterThan($officeStart)) {
+            $lateMinutes = $officeStart->diffInMinutes($checkInTime);
+        }
+
+        // 2) JAM KERJA NORMAL (08:00 - 16:00)
+        // Mulai kerja normal = max(checkIn, 08:00)
+        $normalStart = $checkInTime->lessThan($officeStart) ? $officeStart : $checkInTime;
+        // Selesai kerja normal = min(checkOut, 16:00)
+        $normalEnd = $checkOutTime->greaterThan($officeEnd) ? $officeEnd : $checkOutTime;
+
+        $normalWorkedMinutes = 0;
+        if ($normalEnd->greaterThan($normalStart)) {
+            $normalWorkedMinutes = $normalStart->diffInMinutes($normalEnd);
+        }
+
+        $hoursWorked = round($normalWorkedMinutes / 60, 2);
+
+        // 3) LEMBUR (mulai 18:00)
+        $overtimeMinutes = 0;
+        if ($checkOutTime->greaterThan($overtimeStart)) {
+            $overtimeMinutes = $overtimeStart->diffInMinutes($checkOutTime);
+        }
+
+        $overtime = round($overtimeMinutes / 60, 2);
+
+        // 4) SIMPAN
+        $this->firebase->getDatabase()
+            ->getReference("attendances/{$this->firebase->getCompanyId()}/$today/$employeeId")
+            ->update([
+                'checkOut'        => $checkOutTime->format('H:i'),
+                'hoursWorked'     => $hoursWorked,     // hanya jam normal (08-16)
+                'overtime'        => $overtime,        // hanya jam lembur (>=18)
+                'lateMinutes'     => $lateMinutes,
+                'checkedOutAt'    => $checkOutTime->toISOString(),
+            ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Check-out successful',
+            'data' => [
+                'hours_worked'  => $hoursWorked,
+                'overtime'      => $overtime,
+                'late_minutes'  => $lateMinutes
+            ]
         ]);
-
-        if ($validator->fails()) {
-            return back()->withErrors($validator)->withInput();
-        }
-
-        try {
-            $employee = $this->firebase->getEmployee($employeeId);
-
-            if (!$employee) {
-                return back()->with('error', 'Employee not found');
-            }
-
-            $record = $this->firebase->recordCheckOut($employeeId);
-
-            if (!$record) {
-                return back()->with('error', 'No check-in record found for today');
-            }
-
-            return redirect()->route('attendance.dashboard')
-                ->with('success', 'Check-out recorded successfully!')
-                ->with('checkout_data', [
-                    'employee_id' => $employeeId,
-                    'employee_name' => $employee['name'] ?? 'Unknown',
-                    'check_out' => $record['checkOut'],
-                    'hours_worked' => $record['hoursWorked'] ?? 0,
-                    'overtime' => $record['overtime'] ?? 0,
-                    'time' => $record['checkOut']
-                ]);
-
-        } catch (\Exception $e) {
-            return back()->with('error', 'Check-out failed: ' . $e->getMessage());
-        }
     }
 
     public function report(Request $request)
@@ -221,7 +270,6 @@ class AttendanceController extends Controller
                 }
 
                 return view('attendance.report-single', compact('attendance', 'employee', 'month', 'role'));
-
             } else {
                 // Admin/Manager can see all
                 $requestedEmployeeId = $request->get('employee_id');
@@ -271,7 +319,6 @@ class AttendanceController extends Controller
                     return view('attendance.report-all', compact('stats', 'month', 'allEmployees', 'role'));
                 }
             }
-
         } catch (\Exception $e) {
             return view('attendance.report-all', [
                 'stats' => [],
@@ -314,7 +361,6 @@ class AttendanceController extends Controller
             $monthAttendance = $this->firebase->getAttendanceByMonth($month);
 
             return view('attendance.history', compact('monthAttendance', 'allEmployees', 'month', 'role'));
-
         } catch (\Exception $e) {
             return view('attendance.history', [
                 'monthAttendance' => [],
@@ -370,7 +416,6 @@ class AttendanceController extends Controller
 
             return redirect()->route('attendance.dashboard')
                 ->with('success', "Manual attendance recorded for {$employee['name']} on $date");
-
         } catch (\Exception $e) {
             return back()->with('error', 'Manual entry failed: ' . $e->getMessage());
         }
@@ -430,7 +475,6 @@ class AttendanceController extends Controller
                     'message' => 'Today\'s attendance retrieved'
                 ]);
             }
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -472,13 +516,12 @@ class AttendanceController extends Controller
                     'employee' => $employee,
                     'attendance' => $attendance,
                     'total_days' => count($attendance),
-                    'present_days' => count(array_filter($attendance, function($record) {
+                    'present_days' => count(array_filter($attendance, function ($record) {
                         return isset($record['checkIn']);
                     }))
                 ],
                 'message' => 'Employee attendance retrieved'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
