@@ -159,6 +159,55 @@ class LeaveController extends Controller
                 ]);
         }
     }
+    private function ensureAnnualQuotaResetDbStyle(array $employee): void
+    {
+        $empId = $employee['id'] ?? null;
+        if (!$empId) return;
+
+        $currentYear = (int) now()->format('Y');
+
+        // ✅ reset hanya jalan pada tanggal 1 Januari
+        if (!(now()->month === 1 && now()->day === 1)) {
+            return;
+        }
+
+        $lastYearRaw = $employee['leavequotaYear'] ?? null;
+        $lastYear = $lastYearRaw ? (int) $lastYearRaw : 0;
+
+        if ($lastYear === $currentYear) {
+            return; // sudah reset tahun ini
+        }
+
+        // syarat 1 tahun kerja
+        $joinDate = $employee['joinDate'] ?? null;
+        if (!$joinDate) return;
+
+        $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
+        $today = now()->startOfDay();
+
+        if ($today->lt($join->copy()->addYear())) {
+            // belum 1 tahun => tetap 0
+            $this->firebase->getDatabase()
+                ->getReference('employees/' . $empId)
+                ->update([
+                    'leavequota' => '0',
+                    'leavequotaYear' => (string) $currentYear,
+                    'updatedAt' => now()->toISOString(),
+                ]);
+            return;
+        }
+
+        // ✅ reset: set 12 dan sisa hangus
+        $this->firebase->getDatabase()
+            ->getReference('employees/' . $empId)
+            ->update([
+                'leavequota' => '12',
+                'leavequotaYear' => (string) $currentYear,
+                'updatedAt' => now()->toISOString(),
+            ]);
+    }
+
+
 
     /**
      * Halaman My Leaves untuk karyawan biasa
@@ -176,6 +225,9 @@ class LeaveController extends Controller
         if (!$employee) {
             return redirect()->route('dashboard')->with('error', 'Data karyawan tidak ditemukan.');
         }
+        // ✅ reset tahunan (setiap tahun jadi 12, sisa hangus)
+        $this->ensureAnnualQuotaResetDbStyle($employee);
+
 
         // Auto set quota jika sudah 1 tahun bekerja
         $this->ensureLeaveQuotaUpdatedDbStyle($employee);
@@ -183,6 +235,7 @@ class LeaveController extends Controller
         // ambil ulang setelah update
         $employee = $this->firebase->getEmployee($employeeId);
         $quotaDays = $this->getEmployeeAnnualQuota($employee);
+
 
 
         $rawLeaves = $this->firebase->getEmployeeLeaves($employeeId) ?? [];
@@ -216,7 +269,7 @@ class LeaveController extends Controller
         $quotaTypes = ['annual', 'personal'];
         // Hitung sisa cuti tahunan (contoh: kuota 12 hari)
         $usedAnnualDays = $leavesCollection
-            ->where('leave_type', $quotaTypes)
+            ->whereIn('leave_type', $quotaTypes)
             ->where('status', 'approved')
             ->sum(function ($leave) {
                 return $this->countWorkingDays(
@@ -226,7 +279,8 @@ class LeaveController extends Controller
             });
 
 
-        $remainingLeave = max(0, $quotaDays - $usedAnnualDays);
+        $remainingLeave = max(0, $quotaDays);
+
 
         // Pagination
         $perPage = 10;
@@ -490,6 +544,8 @@ class LeaveController extends Controller
 
             // Ambil data karyawan
             $employee = $this->firebase->getEmployee($leave->employeeId);
+            $rawQuota = $employee['leavequota'] ?? 0;
+            $remainingLeave = ($rawQuota === '' || $rawQuota === null) ? 0 : (int) $rawQuota;
 
             if (!$employee) {
                 $employee = [
