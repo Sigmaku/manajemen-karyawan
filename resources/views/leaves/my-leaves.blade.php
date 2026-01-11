@@ -9,6 +9,10 @@
         <div>
             <h1 class="h3 mb-0">Pengajuan Cuti Saya</h1>
             <p class="text-muted mb-0">Riwayat dan status pengajuan cuti Anda</p>
+            <p class="text-muted mb-0">
+    Jatah cuti : <strong>{{ $quotaDays ?? 0 }}</strong> hari
+</p>
+
         </div>
         <a href="{{ route('leaves.create') }}" class="btn btn-primary">
             <i class="fas fa-plus me-2"></i>Ajukan Cuti Baru

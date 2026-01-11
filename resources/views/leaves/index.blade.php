@@ -75,7 +75,7 @@
                             <th class="text-center">Aksi</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="adminLeaveTableBody">
                         @forelse($leaves as $leave)
                             <tr>
                                 <td>{{ $loop->iteration + $leaves->firstItem() - 1 }}</td>
@@ -131,6 +131,7 @@
                 <i class="fas fa-check"></i>
             </button> --}}
         </form>
+        <span class="text-muted small">Belum diproses</span>
 
         <!-- Reject dengan Modal -->
         {{-- <button type="button" class="btn btn-sm btn-danger ms-1" title="Tolak Cuti"
@@ -164,3 +165,117 @@
 @push('styles')
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 @endpush
+@push('scripts')
+<script>
+(function () {
+    const API_URL = @json(route('leaves.api.all'));
+    const POLL_MS = 8000;
+    const SHOW_BASE = @json(url('/leaves'));
+
+    function escapeHtml(s){
+        if (s === null || s === undefined) return '';
+        return String(s)
+            .replaceAll('&','&amp;')
+            .replaceAll('<','&lt;')
+            .replaceAll('>','&gt;')
+            .replaceAll('"','&quot;')
+            .replaceAll("'","&#039;");
+    }
+
+    function fmtDate(val){
+        if (!val) return '-';
+        try {
+            const d = new Date(val);
+            if (isNaN(d.getTime())) return escapeHtml(val);
+            return d.toLocaleDateString('id-ID');
+        } catch { return escapeHtml(val); }
+    }
+
+    function fmtDateTime(val){
+        if (!val) return '-';
+        try {
+            const d = new Date(val);
+            if (isNaN(d.getTime())) return escapeHtml(val);
+            // jam id-ID kadang pakai titik, jadi ganti ke :
+            return d.toLocaleString('id-ID', {
+                day:'2-digit', month:'2-digit', year:'numeric',
+                hour:'2-digit', minute:'2-digit', hour12:false
+            }).replace('.', ':');
+        } catch { return escapeHtml(val); }
+    }
+
+    function typeName(type){
+        const map = {
+            annual: 'Cuti Tahunan',
+            sick: 'Cuti Sakit',
+            personal: 'Cuti Pribadi',
+            maternity: 'Cuti Melahirkan',
+            paternity: 'Cuti Ayah',
+            unpaid: 'Cuti Tanpa Gaji'
+        };
+        return map[type] || type;
+    }
+
+    function statusBadge(status){
+        if (status === 'approved') return `<span class="badge bg-success">Disetujui</span>`;
+        if (status === 'rejected') return `<span class="badge bg-danger">Ditolak</span>`;
+        if (status === 'pending') return `<span class="badge bg-warning text-dark">Menunggu</span>`;
+        if (status === 'canceled') return `<span class="badge bg-secondary">Dibatalkan</span>`;
+        return `<span class="badge bg-info">${escapeHtml(status)}</span>`;
+    }
+
+    function processedText(status){
+        return (status === 'pending') ? 'Belum diproses' : 'Sudah diproses';
+    }
+
+    let lastHash = '';
+
+    async function poll(){
+        try{
+            const res = await fetch(API_URL, { headers: { 'Accept': 'application/json' }});
+            const json = await res.json();
+            if (!json.success) return;
+
+            const items = json.items || [];
+            const hash = JSON.stringify(items);
+            if (hash === lastHash) return;
+            lastHash = hash;
+
+            const tbody = document.getElementById('adminLeaveTableBody');
+            if (!tbody) return;
+
+            let html = '';
+            items.forEach((lv, idx) => {
+                const showUrl = `${SHOW_BASE}/${encodeURIComponent(lv.id)}`;
+                html += `
+                    <tr>
+                        <td>${idx + 1}</td>
+                        <td>${escapeHtml(lv.employeeName)}</td>
+                        <td>${escapeHtml(lv.department)}</td>
+                        <td>${escapeHtml(typeName(lv.type))}</td>
+                        <td>${fmtDate(lv.startDate)}</td>
+                        <td>${fmtDate(lv.endDate)}</td>
+                        <td>${statusBadge(lv.status)}</td>
+                        <td>${fmtDateTime(lv.createdAt)}</td>
+                        <td>
+                            <a href="${showUrl}" class="btn btn-sm btn-info">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                            <span class="ms-2 text-muted">${processedText(lv.status)}</span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html || `<tr><td colspan="9" class="text-center py-4 text-muted">Tidak ada data</td></tr>`;
+        } catch(e){
+            console.error('admin leave realtime error:', e);
+        }
+    }
+
+    poll();
+    setInterval(poll, POLL_MS);
+})();
+</script>
+@endpush
+

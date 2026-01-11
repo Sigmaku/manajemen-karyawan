@@ -124,6 +124,91 @@ class LeaveController extends Controller
 
         return $workingDays;
     }
+
+    private function getEmployeeAnnualQuota(array $employee): int
+    {
+        // ngikutin DB kamu: "leavequota": "" / "0" / "12"
+        $raw = $employee['leavequota'] ?? 0;
+
+        // jika kosong atau null => 0
+        if ($raw === '' || $raw === null) {
+            return 0;
+        }
+
+        return (int) $raw;
+    }
+
+    private function ensureLeaveQuotaUpdatedDbStyle(array $employee): void
+    {
+        $joinDate = $employee['joinDate'] ?? null;
+        if (!$joinDate) return;
+
+        $currentQuota = $this->getEmployeeAnnualQuota($employee);
+        if ($currentQuota > 0) return; // sudah punya quota
+
+        $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
+        $today = now()->startOfDay();
+
+        // Kalau sudah >= 1 tahun kerja, set quota 12
+        if ($today->gte($join->copy()->addYear())) {
+            $this->firebase->getDatabase()
+                ->getReference('employees/' . $employee['id'])
+                ->update([
+                    'leavequota' => '12', // sesuai DB kamu (string)
+                    'updatedAt' => now()->toISOString(),
+                ]);
+        }
+    }
+    private function ensureAnnualQuotaResetDbStyle(array $employee): void
+    {
+        $empId = $employee['id'] ?? null;
+        if (!$empId) return;
+
+        $currentYear = (int) now()->format('Y');
+
+        // ✅ reset hanya jalan pada tanggal 1 Januari
+        if (!(now()->month === 1 && now()->day === 1)) {
+            return;
+        }
+
+        $lastYearRaw = $employee['leavequotaYear'] ?? null;
+        $lastYear = $lastYearRaw ? (int) $lastYearRaw : 0;
+
+        if ($lastYear === $currentYear) {
+            return; // sudah reset tahun ini
+        }
+
+        // syarat 1 tahun kerja
+        $joinDate = $employee['joinDate'] ?? null;
+        if (!$joinDate) return;
+
+        $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
+        $today = now()->startOfDay();
+
+        if ($today->lt($join->copy()->addYear())) {
+            // belum 1 tahun => tetap 0
+            $this->firebase->getDatabase()
+                ->getReference('employees/' . $empId)
+                ->update([
+                    'leavequota' => '0',
+                    'leavequotaYear' => (string) $currentYear,
+                    'updatedAt' => now()->toISOString(),
+                ]);
+            return;
+        }
+
+        // ✅ reset: set 12 dan sisa hangus
+        $this->firebase->getDatabase()
+            ->getReference('employees/' . $empId)
+            ->update([
+                'leavequota' => '12',
+                'leavequotaYear' => (string) $currentYear,
+                'updatedAt' => now()->toISOString(),
+            ]);
+    }
+
+
+
     /**
      * Halaman My Leaves untuk karyawan biasa
      */
@@ -135,6 +220,23 @@ class LeaveController extends Controller
         if (!$employeeId) {
             return redirect()->route('dashboard')->with('error', 'Data karyawan tidak ditemukan.');
         }
+
+        $employee = $this->firebase->getEmployee($employeeId);
+        if (!$employee) {
+            return redirect()->route('dashboard')->with('error', 'Data karyawan tidak ditemukan.');
+        }
+        // ✅ reset tahunan (setiap tahun jadi 12, sisa hangus)
+        $this->ensureAnnualQuotaResetDbStyle($employee);
+
+
+        // Auto set quota jika sudah 1 tahun bekerja
+        $this->ensureLeaveQuotaUpdatedDbStyle($employee);
+
+        // ambil ulang setelah update
+        $employee = $this->firebase->getEmployee($employeeId);
+        $quotaDays = $this->getEmployeeAnnualQuota($employee);
+
+
 
         $rawLeaves = $this->firebase->getEmployeeLeaves($employeeId) ?? [];
 
@@ -164,10 +266,10 @@ class LeaveController extends Controller
         $approvedLeaves = $leavesCollection->where('status', 'approved')->count();
         $rejectedLeaves = $leavesCollection->where('status', 'rejected')->count();
 
-        $quotaTypes =['annual','personal'];
+        $quotaTypes = ['annual', 'personal'];
         // Hitung sisa cuti tahunan (contoh: kuota 12 hari)
         $usedAnnualDays = $leavesCollection
-            ->where('leave_type', $quotaTypes)
+            ->whereIn('leave_type', $quotaTypes)
             ->where('status', 'approved')
             ->sum(function ($leave) {
                 return $this->countWorkingDays(
@@ -177,7 +279,8 @@ class LeaveController extends Controller
             });
 
 
-        $remainingLeave = max(0, 12 - $usedAnnualDays);
+        $remainingLeave = max(0, $quotaDays);
+
 
         // Pagination
         $perPage = 10;
@@ -197,7 +300,8 @@ class LeaveController extends Controller
             'remainingLeave',
             'pendingLeaves',
             'approvedLeaves',
-            'rejectedLeaves'
+            'rejectedLeaves',
+            'quotaDays'
         ));
     }
     public function apiMyLeaves()
@@ -259,6 +363,61 @@ class LeaveController extends Controller
                 'rejected' => $rejected,
             ],
             'items' => $latest,
+        ]);
+    }
+
+    public function apiAllLeaves(Request $request)
+    {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+
+        if (!in_array($role, ['admin', 'manager'])) {
+            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
+        }
+
+        $rawLeaves = $this->firebase->getAllLeaves() ?? [];
+
+        // optional filter seperti halaman index
+        $status = $request->get('status', 'all');
+        $employeeId = $request->get('employee_id');
+
+        $employees = $this->firebase->getCompanyEmployees();
+
+        $items = collect($rawLeaves)->map(function ($leave, $leaveId) use ($employees) {
+            $empId = $leave['employeeId'] ?? null;
+            $emp = $employees[$empId] ?? null;
+
+            return [
+                'id' => $leaveId,
+                'employeeId' => $empId,
+                'employeeName' => $emp['name'] ?? 'Karyawan Tidak Diketahui',
+                'department' => $emp['department'] ?? '-',
+                'type' => $leave['type'] ?? 'annual',
+                'startDate' => $leave['startDate'] ?? null,
+                'endDate' => $leave['endDate'] ?? null,
+                'status' => $leave['status'] ?? 'pending',
+                'createdAt' => $leave['createdAt'] ?? null,
+            ];
+        });
+
+        if ($status !== 'all') {
+            $items = $items->where('status', $status);
+        }
+        if ($employeeId) {
+            $items = $items->where('employeeId', $employeeId);
+        }
+
+        $items = $items->sortByDesc(function ($x) {
+            try {
+                return \Carbon\Carbon::parse($x['createdAt'])->timestamp;
+            } catch (\Exception $e) {
+                return 0;
+            }
+        })->values();
+
+        return response()->json([
+            'success' => true,
+            'items' => $items->take(50)->values(), // ambil 50 terbaru biar ringan
         ]);
     }
 
@@ -385,6 +544,8 @@ class LeaveController extends Controller
 
             // Ambil data karyawan
             $employee = $this->firebase->getEmployee($leave->employeeId);
+            $rawQuota = $employee['leavequota'] ?? 0;
+            $remainingLeave = ($rawQuota === '' || $rawQuota === null) ? 0 : (int) $rawQuota;
 
             if (!$employee) {
                 $employee = [
@@ -451,10 +612,47 @@ class LeaveController extends Controller
             }
 
             $approvedBy = $user['name'] ?? 'Admin';
+
+            // 1) Approve dulu di Firebase
             $this->firebase->approveLeave($id, $approvedBy);
+
+            // 2) Kalau jenis cuti = annual → POTONG QUOTA
+            $leaveType = $leave['type'] ?? null;
+            if ($leaveType === 'annual') {
+
+                $employeeId = $leave['employeeId'] ?? null;
+                if ($employeeId) {
+                    $employee = $this->firebase->getEmployee($employeeId);
+                    if ($employee) {
+                        // quota saat ini (ngikut DB kamu: leavequota bisa "" / string)
+                        $rawQuota = $employee['leavequota'] ?? 0;
+                        $currentQuota = ($rawQuota === '' || $rawQuota === null) ? 0 : (int) $rawQuota;
+
+                        // hitung hari kerja yang disetujui
+                        $start = $leave['startDate'] ?? null;
+                        $end   = $leave['endDate'] ?? null;
+
+                        $days = 0;
+                        if ($start && $end) {
+                            $days = $this->countWorkingDays($start, $end);
+                        }
+
+                        $newQuota = max(0, $currentQuota - $days);
+
+                        // update quota ke employee
+                        $this->firebase->getDatabase()
+                            ->getReference('employees/' . $employeeId)
+                            ->update([
+                                'leavequota' => (string) $newQuota, // simpan string sesuai DB kamu
+                                'updatedAt' => now()->toISOString(),
+                            ]);
+                    }
+                }
+            }
 
             return back()->with('success', "Cuti berhasil disetujui oleh $approvedBy.");
         } catch (\Exception $e) {
+            \Log::error('LeaveController@approve error: ' . $e->getMessage());
             return back()->with('error', 'Gagal menyetujui cuti.');
         }
     }
