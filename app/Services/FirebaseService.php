@@ -814,4 +814,53 @@ class FirebaseService
             ->getReference("attendances/{$this->companyId}/$date/$employeeId")
             ->update($data);
     }
+
+        // FirebaseService.php - Tambahkan method:
+
+    /**
+     * Generate barcode data for employee
+     */
+    public function generateEmployeeBarcode($employeeId)
+    {
+        try {
+            $employee = $this->getEmployee($employeeId);
+            if (!$employee) {
+                return null;
+            }
+
+            $timestamp = time();
+            $secret = md5($employeeId . $timestamp . env('BARCODE_SECRET', 'attendance_secret'));
+
+            return [
+                'barcode' => $employeeId . ':' . $timestamp . ':' . $secret,
+                'employee_id' => $employeeId,
+                'employee_name' => $employee['name'],
+                'timestamp' => $timestamp,
+                'valid_until' => date('Y-m-d H:i:s', $timestamp + 30),
+                'qr_data' => $employeeId . '|' . $employee['name'] . '|' . date('YmdHis')
+            ];
+        } catch (\Exception $e) {
+            Log::error('Generate barcode error: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Get barcode scan logs
+     */
+    public function getBarcodeLogs($limit = 100)
+    {
+        try {
+            $logs = $this->database
+                ->getReference('barcode_logs/' . $this->companyId)
+                ->orderByChild('timestamp')
+                ->limitToLast($limit)
+                ->getValue();
+
+            return $logs ? array_reverse($logs) : [];
+        } catch (\Exception $e) {
+            Log::error('Get barcode logs error: ' . $e->getMessage());
+            return [];
+        }
+    }
 }

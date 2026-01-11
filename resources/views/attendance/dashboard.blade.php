@@ -4,41 +4,89 @@
 <div class="container-fluid">
     <h1 class="h3 mb-4">Attendance Dashboard</h1>
 
-    <!-- Check In/Out Section
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card text-center h-100">
+    @php
+        // CEK APAKAH KARYAWAN SUDAH CHECK-IN HARI INI
+        $hasCheckedIn = false;
+        $todayDate = date('Y-m-d');
+        $todayAttendanceData = null;
+
+        if ($role === 'employee') {
+            // Cek dari employeeAttendance
+            if (isset($employeeAttendance) && is_array($employeeAttendance)) {
+                foreach ($employeeAttendance as $date => $record) {
+                    if ($date == $todayDate && isset($record['checkIn'])) {
+                        $hasCheckedIn = true;
+                        $todayAttendanceData = $record;
+                        break;
+                    }
+                }
+            }
+
+            // Atau cek dari todayAttendance jika ada
+            if (isset($todayAttendance) && $todayAttendance) {
+                $hasCheckedIn = true;
+                $todayAttendanceData = $todayAttendance;
+            }
+        }
+    @endphp
+
+    <!-- UNTUK KARYAWAN YANG BELUM CHECK-IN -->
+    @if($role === 'employee' && !$hasCheckedIn)
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-warning text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-exclamation-circle me-2"></i>Daily Check-in Required
+                    </h5>
+                </div>
                 <div class="card-body">
-                    <h5 class="card-title">Check In</h5>
-                    <div class="display-4 text-success mb-3">
-                        <i class="fas fa-sign-in-alt"></i>
+                    <div class="text-center mb-4">
+                        <i class="fas fa-clock fa-4x text-warning mb-3"></i>
+                        <h4>You need to check-in first</h4>
+                        <p class="text-muted">Please check-in to access attendance features and generate your barcode</p>
                     </div>
-                    <button class="btn btn-success btn-lg w-100" data-bs-toggle="modal" data-bs-target="#checkInModal">
-                        CHECK IN NOW
-                    </button>
-                    <p class="text-muted mt-3 mb-0" id="lastCheckIn">
-                        Last check-in: Not yet
-                    </p>
+
+                    <form action="{{ route('attendance.check-in') }}" method="POST">
+                        @csrf
+                        <input type="hidden" name="employee_id" value="{{ $currentEmployeeId }}">
+
+                        <div class="mb-3">
+                            <label class="form-label">Location *</label>
+                            <select class="form-select" name="location" required>
+                                <option value="Office">Office</option>
+                                <option value="Remote">Remote</option>
+                                <option value="Client Site">Client Site</option>
+                                <option value="Field">Field</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Notes (Optional)</label>
+                            <textarea class="form-control" name="notes" rows="2"
+                                      placeholder="Any notes for today..."></textarea>
+                        </div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-sign-in-alt me-2"></i>Check In Now
+                            </button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
-        <div class="col-md-6">
-            <div class="card text-center h-100">
-                <div class="card-body">
-                    <h5 class="card-title">Check Out</h5>
-                    <div class="display-4 text-danger mb-3">
-                        <i class="fas fa-sign-out-alt"></i>
-                    </div>
-                    <button class="btn btn-danger btn-lg w-100" onclick="checkOut()">
-                        CHECK OUT NOW
-                    </button>
-                    <p class="text-muted mt-3 mb-0" id="lastCheckOut">
-                        Last check-out: Not yet
-                    </p>
-                </div>
-            </div>
-        </div>
-    </div> -->
+    </div>
+
+    <!-- TOMBOL BACK TO DASHBOARD -->
+    <div class="text-center mt-3">
+        <a href="{{ route('dashboard') }}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Main Dashboard
+        </a>
+    </div>
+
+    @else
+    <!-- UNTUK ADMIN/MANAGER ATAU KARYAWAN YANG SUDAH CHECK-IN -->
 
     <!-- Today's Attendance Table -->
     <div class="card">
@@ -100,7 +148,7 @@
                                 <div class="text-muted">
                                     <i class="fas fa-clock fa-2x mb-3"></i>
                                     <p>No attendance recorded yet for today</p>
-                                    <small>Click CHECK IN to record first attendance</small>
+                                    <small>Check-in to record attendance</small>
                                 </div>
                             </td>
                         </tr>
@@ -166,45 +214,94 @@
             </div>
         </div>
     </div>
+
+    <!-- TOMBOL BARCODE HANYA UNTUK KARYAWAN YANG SUDAH CHECK-IN -->
+    @if($role === 'employee' && $hasCheckedIn)
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">
+                        <i class="fas fa-qrcode me-2"></i>Check-in Verification
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <div class="alert alert-success mb-0">
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-check-circle fa-2x me-3"></i>
+                                    <div>
+                                        <h6 class="mb-1">You're Checked In</h6>
+                                        <p class="mb-0">
+                                            Check-in: <strong>{{ $todayAttendanceData['checkIn'] ?? '-' }}</strong>
+                                            @if(isset($todayAttendanceData['checkOut']))
+                                                | Check-out: <strong>{{ $todayAttendanceData['checkOut'] }}</strong>
+                                            @endif
+                                        </p>
+                                        @if(isset($todayAttendanceData['location']))
+                                        <small class="text-muted">Location: {{ $todayAttendanceData['location'] }}</small>
+                                        @endif
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="btn-group" role="group">
+                                @if(!isset($todayAttendanceData['checkOut']))
+                                <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#checkOutModal">
+                                    <i class="fas fa-sign-out-alt me-2"></i>Check Out
+                                </button>
+                                @endif
+
+                                <!-- TOMBOL BARCODE -->
+                                <a href="{{ route('barcode.employee.view') }}" class="btn btn-primary">
+                                    <i class="fas fa-qrcode me-2"></i>Get Check-in Barcode
+                                </a>
+                            </div>
+
+                            <div class="mt-2">
+                                <small class="text-muted">Show barcode to supervisor for verification</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    @endif
+
+    @endif <!-- END IF HAS CHECKED IN -->
 </div>
 
-<!-- Check In Modal -->
-<div class="modal fade" id="checkInModal">
-    <div class="modal-dialog">
+<!-- Check Out Modal -->
+<div class="modal fade" id="checkOutModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Check In</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            <div class="modal-header border-0">
+                <h5 class="modal-title text-danger">
+                    <i class="fas fa-sign-out-alt me-2"></i>Confirm Check Out
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body">
-                <form id="checkInForm">
-                    @csrf
-                    <div class="mb-3">
-                        <label class="form-label">Employee ID *</label>
-                        <input type="text" class="form-control" name="employee_id"
-                               placeholder="EMP001" required>
-                        <small class="text-muted">Enter your employee ID</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Location *</label>
-                        <select class="form-select" name="location" required>
-                            <option value="Office">Office</option>
-                            <option value="Remote">Remote</option>
-                            <option value="Client Site">Client Site</option>
-                            <option value="Business Trip">Business Trip</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Notes (Optional)</label>
-                        <textarea class="form-control" name="notes" rows="2" placeholder="Optional notes..."></textarea>
-                    </div>
-                </form>
+            <div class="modal-body text-center py-4">
+                <i class="fas fa-clock fa-4x text-warning mb-4"></i>
+                <h6>Are you sure you want to check out now?</h6>
+                <p class="text-muted">
+                    Once checked out, you cannot check in again today.
+                </p>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="submitCheckIn()">
-                    <i class="fas fa-check me-2"></i>Check In
+            <div class="modal-footer border-0 justify-content-center">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-2"></i>Cancel
                 </button>
+                <form action="{{ route('attendance.check-out') }}" method="POST" class="d-inline">
+                    @csrf
+                    <input type="hidden" name="employee_id" value="{{ $currentEmployeeId }}">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-sign-out-alt me-2"></i>Yes, Check Out
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -212,68 +309,6 @@
 
 @push('scripts')
 <script>
-    // Check In Function
-    function submitCheckIn() {
-        const form = document.getElementById('checkInForm');
-        const formData = new FormData(form);
-
-        fetch('{{ route("attendance.check-in") }}', {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-CSRF-TOKEN': '{{ csrf_token() }}'
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                $('#checkInModal').modal('hide');
-                showToast('success', data.message);
-                document.getElementById('lastCheckIn').textContent =
-                    `Last check-in: ${data.time || 'Just now'}`;
-                // Refresh page setelah 1 detik
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showToast('error', data.message || 'Check-in failed');
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showToast('error', 'Network error. Please try again.');
-        });
-    }
-
-    // Check Out Function
-    function checkOut() {
-        const employeeId = prompt('Enter your Employee ID:');
-        if (!employeeId) return;
-
-        fetch('{{ route("attendance.check-out") }}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': '{{ csrf_token() }}'
-            },
-            body: JSON.stringify({ employee_id: employeeId })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showToast('success', data.message);
-                document.getElementById('lastCheckOut').textContent =
-                    `Last check-out: ${new Date().toLocaleTimeString()}`;
-                // Refresh page setelah 1 detik
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showToast('error', data.message || 'Check-out failed');
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showToast('error', 'Network error. Please try again.');
-        });
-    }
-
     // Toast notification function
     function showToast(type, message) {
         const toastHtml = `
