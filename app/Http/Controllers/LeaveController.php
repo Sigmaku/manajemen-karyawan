@@ -21,22 +21,15 @@ class LeaveController extends Controller
 
     // ==================== WEB METHODS ====================
 
-    /**
-     * Halaman utama manajemen cuti
-     * Admin & Manager → lihat semua
-     * Employee → redirect ke My Leaves
-     */
     public function index(Request $request)
     {
         $user = session('user');
         $role = $user['role'] ?? 'employee';
 
-        // Employee langsung ke My Leaves
         if ($role === 'employee') {
             return redirect()->route('leaves.my');
         }
 
-        // Hanya admin & manager yang boleh lanjut
         try {
             $rawLeaves = $this->firebase->getAllLeaves() ?? [];
 
@@ -47,37 +40,29 @@ class LeaveController extends Controller
                 );
 
                 return (object) [
-                    'id'                   => $leaveId,
-                    'employeeId'           => $leave['employeeId'] ?? null,
-                    'leave_type'           => $leave['type'] ?? 'annual',
-                    'start_date'           => $leave['startDate'] ?? null,
-                    'end_date'             => $leave['endDate'] ?? null,
-                    'reason'               => $leave['reason'] ?? '-',
-                    'status'               => $leave['status'] ?? 'pending',
-                    'created_at'           => Carbon::parse($leave['createdAt'] ?? now()),
-                    'contact_during_leave' => $leave['contactDuringLeave'] ?? '-',
-                    'proof_url'            => $leave['proof_url'] ?? null, // NEW
-                    'proof_filename'       => $leave['proof_filename'] ?? null, // NEW
-                    'days'                 => $days,
+                    'id'                    => $leaveId,
+                    'employeeId'            => $leave['employeeId'] ?? null,
+                    'leave_type'            => $leave['type'] ?? 'annual',
+                    'start_date'            => $leave['startDate'] ?? null,
+                    'end_date'              => $leave['endDate'] ?? null,
+                    'reason'                => $leave['reason'] ?? '-',
+                    'status'                => $leave['status'] ?? 'pending',
+                    'created_at'            => Carbon::parse($leave['createdAt'] ?? now()),
+                    'contact_during_leave'  => $leave['contactDuringLeave'] ?? '-',
+                    'proof_url'             => $leave['proof_url'] ?? null,
+                    'proof_filename'        => $leave['proof_filename'] ?? null,
+                    'days'                  => $days,
                 ];
             })->sortByDesc('created_at');
 
-            // Filter status
+            // Filter status & employee
             $status = $request->get('status', 'all');
-            if ($status !== 'all') {
-                $leavesCollection = $leavesCollection->where('status', $status);
-            }
-
-            // Filter karyawan
+            if ($status !== 'all') $leavesCollection = $leavesCollection->where('status', $status);
+            
             $employeeId = $request->get('employee_id');
-            if ($employeeId) {
-                $leavesCollection = $leavesCollection->where('employeeId', $employeeId);
-            }
-
-            $leavesCollection = $leavesCollection->sortByDesc('created_at');
+            if ($employeeId) $leavesCollection = $leavesCollection->where('employeeId', $employeeId);
 
             $employees = $this->firebase->getCompanyEmployees();
-
             $leavesCollection = $leavesCollection->map(function ($leave) use ($employees) {
                 $emp = $employees[$leave->employeeId] ?? null;
                 $leave->employee_name = $emp['name'] ?? 'Karyawan Tidak Diketahui';
@@ -85,7 +70,6 @@ class LeaveController extends Controller
                 return $leave;
             });
 
-            // Pagination
             $perPage = 10;
             $currentPage = $request->input('page', 1);
             $paginatedItems = $leavesCollection->forPage($currentPage, $perPage)->values();
@@ -112,96 +96,106 @@ class LeaveController extends Controller
 
     private function countWorkingDays($startDate, $endDate)
     {
+        if(!$startDate || !$endDate) return 0;
         $start = Carbon::parse($startDate);
         $end   = Carbon::parse($endDate);
-
         $workingDays = 0;
-
         foreach (CarbonPeriod::create($start, $end) as $date) {
-            // isWeekday() = Senin–Jumat
-            if ($date->isWeekday()) {
-                $workingDays++;
-            }
+            if ($date->isWeekday()) $workingDays++;
         }
-
         return $workingDays;
     }
 
-    /**
-     * Halaman My Leaves untuk karyawan biasa
-     */
+    // --- Bagian yang Tadi Conflict (Diambil dari Main) ---
+    private function getEmployeeAnnualQuota(array $employee): int
+    {
+        $raw = $employee['leavequota'] ?? 0;
+        if ($raw === '' || $raw === null) return 0;
+        return (int) $raw;
+    }
+
+    private function ensureLeaveQuotaUpdatedDbStyle(array $employee): void
+    {
+        $joinDate = $employee['joinDate'] ?? null;
+        if (!$joinDate) return;
+        $currentQuota = $this->getEmployeeAnnualQuota($employee);
+        if ($currentQuota > 0) return;
+        $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
+        $today = now()->startOfDay();
+        if ($today->gte($join->copy()->addYear())) {
+            $this->firebase->getDatabase()->getReference('employees/' . $employee['id'])->update([
+                'leavequota' => '12',
+                'updatedAt' => now()->toISOString(),
+            ]);
+        }
+    }
+
+    private function ensureAnnualQuotaResetDbStyle(array $employee): void
+    {
+        $empId = $employee['id'] ?? null;
+        if (!$empId) return;
+        if (!(now()->month === 1 && now()->day === 1)) return;
+        $currentYear = (int) now()->format('Y');
+        $lastYearRaw = $employee['leavequotaYear'] ?? null;
+        if ($lastYearRaw && (int)$lastYearRaw === $currentYear) return;
+        $joinDate = $employee['joinDate'] ?? null;
+        if (!$joinDate) return;
+        $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
+        $quota = now()->startOfDay()->lt($join->addYear()) ? '0' : '12';
+        $this->firebase->getDatabase()->getReference('employees/' . $empId)->update([
+            'leavequota' => $quota,
+            'leavequotaYear' => (string) $currentYear,
+            'updatedAt' => now()->toISOString(),
+        ]);
+    }
+    // --- End of Conflict Resolve ---
+
     public function myLeaves(Request $request)
     {
         $user = session('user');
         $employeeId = $user['employee_id'] ?? null;
+        if (!$employeeId) return redirect()->route('dashboard')->with('error', 'Data tidak ditemukan.');
 
-        if (!$employeeId) {
-            return redirect()->route('dashboard')->with('error', 'Data karyawan tidak ditemukan.');
-        }
+        $employee = $this->firebase->getEmployee($employeeId);
+        if (!$employee) return redirect()->route('dashboard')->with('error', 'Data tidak ditemukan.');
+
+        // Jalankan logic quota
+        $this->ensureAnnualQuotaResetDbStyle($employee);
+        $this->ensureLeaveQuotaUpdatedDbStyle($employee);
+        $employee = $this->firebase->getEmployee($employeeId);
+        $quotaDays = $this->getEmployeeAnnualQuota($employee);
 
         $rawLeaves = $this->firebase->getEmployeeLeaves($employeeId) ?? [];
-
         $leavesCollection = collect($rawLeaves)->map(function ($leave, $leaveId) {
-            $days = $this->countWorkingDays(
-                $leave['startDate'] ?? null,
-                $leave['endDate'] ?? null
-            );
-
             return (object) [
-                'id'                   => $leaveId,
-                'employeeId'           => $leave['employeeId'] ?? null,
-                'leave_type'           => $leave['type'] ?? 'annual',
-                'start_date'           => $leave['startDate'] ?? null,
-                'end_date'             => $leave['endDate'] ?? null,
-                'reason'               => $leave['reason'] ?? '-',
-                'status'               => $leave['status'] ?? 'pending',
-                'created_at'           => Carbon::parse($leave['createdAt'] ?? now()),
-                'contact_during_leave' => $leave['contactDuringLeave'] ?? '-',
-                'proof_url'            => $leave['proof_url'] ?? null, // NEW
-                'proof_filename'       => $leave['proof_filename'] ?? null, // NEW
-                'days'                 => $days,
+                'id'                    => $leaveId,
+                'employeeId'            => $leave['employeeId'] ?? null,
+                'leave_type'            => $leave['type'] ?? 'annual',
+                'start_date'            => $leave['startDate'] ?? null,
+                'end_date'              => $leave['endDate'] ?? null,
+                'reason'                => $leave['reason'] ?? '-',
+                'status'                => $leave['status'] ?? 'pending',
+                'created_at'            => Carbon::parse($leave['createdAt'] ?? now()),
+                'contact_during_leave'  => $leave['contactDuringLeave'] ?? '-',
+                'proof_url'             => $leave['proof_url'] ?? null,
+                'proof_filename'        => $leave['proof_filename'] ?? null,
+                'days'                  => $this->countWorkingDays($leave['startDate'], $leave['endDate']),
             ];
         });
 
-        // Summary untuk card
         $pendingLeaves  = $leavesCollection->where('status', 'pending')->count();
         $approvedLeaves = $leavesCollection->where('status', 'approved')->count();
         $rejectedLeaves = $leavesCollection->where('status', 'rejected')->count();
+        
+        // Pake quotaDays yang dinamis (Resolve Conflict baris 200-an)
+        $remainingLeave = max(0, $quotaDays);
 
-        $quotaTypes = ['annual', 'personal'];
-        // Hitung sisa cuti tahunan (contoh: kuota 12 hari)
-        $usedAnnualDays = $leavesCollection
-            ->where('leave_type', $quotaTypes)
-            ->where('status', 'approved')
-            ->sum(function ($leave) {
-                return $this->countWorkingDays(
-                    $leave->start_date,
-                    $leave->end_date
-                );
-            });
-
-        $remainingLeave = max(0, 12 - $usedAnnualDays);
-
-        // Pagination
         $perPage = 10;
         $currentPage = $request->input('page', 1);
         $paginatedItems = $leavesCollection->forPage($currentPage, $perPage)->values();
+        $leaves = new LengthAwarePaginator($paginatedItems, $leavesCollection->count(), $perPage, $currentPage, ['path' => $request->url()]);
 
-        $leaves = new LengthAwarePaginator(
-            $paginatedItems,
-            $leavesCollection->count(),
-            $perPage,
-            $currentPage,
-            ['path' => $request->url(), 'query' => $request->query()]
-        );
-
-        return view('leaves.my-leaves', compact(
-            'leaves',
-            'remainingLeave',
-            'pendingLeaves',
-            'approvedLeaves',
-            'rejectedLeaves'
-        ));
+        return view('leaves.my-leaves', compact('leaves', 'remainingLeave', 'pendingLeaves', 'approvedLeaves', 'rejectedLeaves', 'quotaDays'));
     }
 
     public function apiMyLeaves()
@@ -265,6 +259,72 @@ class LeaveController extends Controller
             ],
             'items' => $latest,
         ]);
+    }
+
+public function apiAllLeaves(Request $request)
+    {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+
+        // Hanya admin/manager yang bisa akses API ini
+        if (!in_array($role, ['admin', 'manager'])) {
+            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
+        }
+
+        try {
+            $rawLeaves = $this->firebase->getAllLeaves() ?? [];
+            $employees = $this->firebase->getCompanyEmployees();
+
+            // Filter optional
+            $statusFilter = $request->get('status', 'all');
+            $employeeFilter = $request->get('employee_id');
+
+            $items = collect($rawLeaves)->map(function ($leave, $leaveId) use ($employees) {
+                $empId = $leave['employeeId'] ?? null;
+                $emp = $employees[$empId] ?? null;
+
+                return [
+                    'id'            => $leaveId,
+                    'employeeId'    => $empId,
+                    'employeeName'  => $emp['name'] ?? 'Karyawan Tidak Diketahui',
+                    'department'    => $emp['department'] ?? '-',
+                    'type'          => $leave['type'] ?? 'annual',
+                    'startDate'     => $leave['startDate'] ?? null,
+                    'endDate'       => $leave['endDate'] ?? null,
+                    'status'        => $leave['status'] ?? 'pending',
+                    'createdAt'     => $leave['createdAt'] ?? null,
+                    'proof_url'     => $leave['proof_url'] ?? null,
+                ];
+            });
+
+            // Jalankan Filter Status
+            if ($statusFilter !== 'all') {
+                $items = $items->where('status', $statusFilter);
+            }
+            
+            // Jalankan Filter Karyawan
+            if ($employeeFilter) {
+                $items = $items->where('employeeId', $employeeFilter);
+            }
+
+            // Urutkan dari yang terbaru
+            $items = $items->sortByDesc(function ($x) {
+                try {
+                    return \Carbon\Carbon::parse($x['createdAt'])->timestamp;
+                } catch (\Exception $e) {
+                    return 0;
+                }
+            })->values();
+
+            return response()->json([
+                'success' => true,
+                'items'   => $items->take(50)->values(), // Ambil 50 saja biar ringan
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('LeaveController@apiAllLeaves error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Internal Server Error'], 500);
+        }
     }
 
     public function create()
@@ -467,6 +527,8 @@ class LeaveController extends Controller
 
             // Ambil data karyawan
             $employee = $this->firebase->getEmployee($leave->employeeId);
+            $rawQuota = $employee['leavequota'] ?? 0;
+            $remainingLeave = ($rawQuota === '' || $rawQuota === null) ? 0 : (int) $rawQuota;
 
             if (!$employee) {
                 $employee = [
@@ -529,10 +591,47 @@ class LeaveController extends Controller
             }
 
             $approvedBy = $user['name'] ?? 'Admin';
+
+            // 1) Approve dulu di Firebase
             $this->firebase->approveLeave($id, $approvedBy);
+
+            // 2) Kalau jenis cuti = annual → POTONG QUOTA
+            $leaveType = $leave['type'] ?? null;
+            if ($leaveType === 'annual') {
+
+                $employeeId = $leave['employeeId'] ?? null;
+                if ($employeeId) {
+                    $employee = $this->firebase->getEmployee($employeeId);
+                    if ($employee) {
+                        // quota saat ini (ngikut DB kamu: leavequota bisa "" / string)
+                        $rawQuota = $employee['leavequota'] ?? 0;
+                        $currentQuota = ($rawQuota === '' || $rawQuota === null) ? 0 : (int) $rawQuota;
+
+                        // hitung hari kerja yang disetujui
+                        $start = $leave['startDate'] ?? null;
+                        $end   = $leave['endDate'] ?? null;
+
+                        $days = 0;
+                        if ($start && $end) {
+                            $days = $this->countWorkingDays($start, $end);
+                        }
+
+                        $newQuota = max(0, $currentQuota - $days);
+
+                        // update quota ke employee
+                        $this->firebase->getDatabase()
+                            ->getReference('employees/' . $employeeId)
+                            ->update([
+                                'leavequota' => (string) $newQuota, // simpan string sesuai DB kamu
+                                'updatedAt' => now()->toISOString(),
+                            ]);
+                    }
+                }
+            }
 
             return back()->with('success', "Cuti berhasil disetujui oleh $approvedBy.");
         } catch (\Exception $e) {
+            \Log::error('LeaveController@approve error: ' . $e->getMessage());
             return back()->with('error', 'Gagal menyetujui cuti.');
         }
     }

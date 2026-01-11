@@ -49,7 +49,6 @@ class EmployeeController extends Controller
             }
 
             return view('employees.index', compact('employees'));
-
         } catch (\Exception $e) {
             Log::error('EmployeeController index error: ' . $e->getMessage());
 
@@ -165,7 +164,6 @@ class EmployeeController extends Controller
                     ->with('success', "Employee created successfully! ID: $employeeId")
                     ->with('info', 'No login account created. You can create it later from employee details.');
             }
-
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to create employee: ' . $e->getMessage())
                 ->withInput();
@@ -181,10 +179,42 @@ class EmployeeController extends Controller
                 abort(404, 'Employee not found');
             }
 
+            // =========================
+            // AUTO SET LEAVE QUOTA (ikut DB: leavequota)
+            // =========================
+            $rawQuota = $employee['leavequota'] ?? '';
+            $currentQuota = ($rawQuota === '' || $rawQuota === null) ? 0 : (int) $rawQuota;
+
+            $joinDate = $employee['joinDate'] ?? null;
+            if ($joinDate) {
+                $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
+                $today = now()->startOfDay();
+
+                // Jika sudah >= 1 tahun kerja & quota masih 0 => set quota 12
+                if ($today->gte($join->copy()->addYear()) && $currentQuota === 0) {
+                    $this->firebase->getDatabase()
+                        ->getReference('employees/' . $employee['id'])
+                        ->update([
+                            'leavequota' => '12', // simpan string sesuai DB kamu
+                            'updatedAt'  => now()->toISOString(),
+                        ]);
+
+                    // update variabel lokal agar langsung tampil
+                    $currentQuota = 12;
+                    $employee['leavequota'] = '12';
+                }
+            }
+
+            $remainingLeave = $currentQuota;
+
+            // =========================
             // Check if has account
+            // =========================
             $hasAccount = isset($employee['uid']) && !empty($employee['uid']);
 
+            // =========================
             // Get this month attendance only
+            // =========================
             $attendance = $this->firebase->getEmployeeAttendance($id, date('Y-m'));
 
             // Calculate stats
@@ -201,13 +231,22 @@ class EmployeeController extends Controller
 
             $attendanceRate = $totalDays > 0 ? round(($presentDays / $totalDays) * 100, 1) : 0;
 
-            return view('employees.show', compact('employee', 'attendance', 'totalDays', 'presentDays', 'totalHours', 'attendanceRate', 'hasAccount'));
-
+            return view('employees.show', compact(
+                'employee',
+                'attendance',
+                'totalDays',
+                'presentDays',
+                'totalHours',
+                'attendanceRate',
+                'hasAccount',
+                'remainingLeave' // ✅ kirim ke blade untuk tampilkan sisa cuti
+            ));
         } catch (\Exception $e) {
             return redirect()->route('employees.index')
                 ->with('error', 'Failed to load employee: ' . $e->getMessage());
         }
     }
+
 
     // EDIT - Form edit employee
     public function edit($id)
@@ -222,7 +261,6 @@ class EmployeeController extends Controller
             $positions = ['Manager', 'Supervisor', 'Staff', 'Intern', 'Developer', 'Designer'];
 
             return view('employees.edit', compact('employee', 'departments', 'positions'));
-
         } catch (\Exception $e) {
             return redirect()->route('employees.index')
                 ->with('error', 'Failed to load employee: ' . $e->getMessage());
@@ -277,7 +315,6 @@ class EmployeeController extends Controller
 
             return redirect()->route('employees.show', $id)
                 ->with('success', 'Employee updated successfully!');
-
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to update employee: ' . $e->getMessage())
                 ->withInput();
@@ -292,7 +329,6 @@ class EmployeeController extends Controller
 
             return redirect()->route('employees.index')
                 ->with('success', 'Employee deleted successfully!');
-
         } catch (\Exception $e) {
             return redirect()->route('employees.index')
                 ->with('error', 'Failed to delete employee: ' . $e->getMessage());
@@ -348,7 +384,6 @@ class EmployeeController extends Controller
                     'password' => $password,
                     'employee_id' => $id
                 ]);
-
         } catch (\Exception $e) {
             return redirect()->route('employees.show', $id)
                 ->with('error', 'Failed to create account: ' . $e->getMessage());
@@ -422,7 +457,6 @@ class EmployeeController extends Controller
                     'password_type' => $request->password_type
                 ]
             ]);
-
         } catch (\Kreait\Firebase\Auth\FailedToChangePassword $e) {
             Log::error('Firebase password change error: ' . $e->getMessage());
             return response()->json([
@@ -459,7 +493,6 @@ class EmployeeController extends Controller
                 'data' => $history ?: [],
                 'message' => 'Password history retrieved'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -512,7 +545,6 @@ class EmployeeController extends Controller
                 'message' => 'Password reset forced. Employee must change password on next login.',
                 'temporary_password' => $tempPassword
             ]);
-
         } catch (\Exception $e) {
             Log::error('Force password change error: ' . $e->getMessage());
             return response()->json([
@@ -610,7 +642,6 @@ class EmployeeController extends Controller
                     'password' => $newPassword,
                     'employee_id' => $id
                 ]);
-
         } catch (\Exception $e) {
             return redirect()->route('employees.show', $id)
                 ->with('error', 'Failed to reset password: ' . $e->getMessage());
@@ -631,7 +662,6 @@ class EmployeeController extends Controller
                 'count' => count($employees),
                 'message' => 'Employees retrieved successfully'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -659,7 +689,6 @@ class EmployeeController extends Controller
                 'data' => $employee,
                 'message' => 'Employee retrieved successfully'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -692,13 +721,12 @@ class EmployeeController extends Controller
                     'attendance' => $attendance,
                     'month' => $month,
                     'total_days' => count($attendance),
-                    'present_days' => count(array_filter($attendance, function($day) {
+                    'present_days' => count(array_filter($attendance, function ($day) {
                         return isset($day['checkIn']);
                     }))
                 ],
                 'message' => 'Attendance retrieved successfully'
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -708,4 +736,3 @@ class EmployeeController extends Controller
         }
     }
 }
-
