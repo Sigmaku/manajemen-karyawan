@@ -538,7 +538,14 @@ class FirebaseService
         }
     }
 
-    public function createLeave(array $data)
+    /**
+     * Create leave with proof (NEW METHOD)
+     * @param array $data Leave data
+     * @param string|null $proofUrl Cloudinary URL (optional)
+     * @param string|null $proofFilename Original filename (optional)
+     * @return string Leave ID
+     */
+    public function createLeaveWithProof(array $data, ?string $proofUrl = null, ?string $proofFilename = null)
     {
         try {
             $leaveId = 'leave_' . str_pad(rand(1, 999), 3, '0', STR_PAD_LEFT);
@@ -551,22 +558,36 @@ class FirebaseService
                 'reason' => $data['reason'],
                 'contactDuringLeave' => $data['contact_during_leave'] ?? '',
                 'status' => 'pending',
-                'createdAt' => now()->toISOString(),      // ✅ FIX
-                'appliedDate' => now()->toISOString(),    // ✅ FIX (opsional)
+                'createdAt' => now()->toISOString(),
+                'appliedDate' => now()->toISOString(),
                 'approvedBy' => null
             ];
 
+            // Add proof data if provided
+            if ($proofUrl) {
+                $leaveData['proof_url'] = $proofUrl;
+                $leaveData['proof_filename'] = $proofFilename;
+            }
 
             $this->database
                 ->getReference("leaveRequests/{$this->companyId}/{$leaveId}")
                 ->set($leaveData);
 
-            Log::info("Leave created: $leaveId");
+            Log::info("Leave created with proof: $leaveId" . ($proofUrl ? " (with proof)" : ""));
             return $leaveId;
         } catch (\Exception $e) {
-            Log::error('Firebase createLeave error: ' . $e->getMessage());
+            Log::error('Firebase createLeaveWithProof error: ' . $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Original createLeave method - KEEP FOR BACKWARD COMPATIBILITY
+     */
+    public function createLeave(array $data)
+    {
+        // Reuse the new method but without proof
+        return $this->createLeaveWithProof($data, null, null);
     }
 
     public function getEmployeeLeaves($employeeId)
@@ -754,8 +775,6 @@ class FirebaseService
         }
     }
 
-    // Tambahkan method ini di FirebaseService.php
-
     public function getEmployeeLiveStatus($employeeId)
     {
         try {
@@ -783,6 +802,7 @@ class FirebaseService
             return ['status' => 'error', 'last_update' => null];
         }
     }
+
     public function updateLiveStatus($employeeId, $status, $data = [])
     {
         try {
@@ -806,6 +826,7 @@ class FirebaseService
             return false;
         }
     }
+
     public function updateAttendance($employeeId, array $data)
     {
         $date = date('Y-m-d');

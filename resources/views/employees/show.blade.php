@@ -44,6 +44,13 @@
 
                         <div class="col-md-9">
                             <div class="row">
+                                <div class="col-md-6">
+    <strong class="text-muted">Sisa Cuti </strong>
+    <p class="mb-0 fs-5">
+        {{ $remainingLeave ?? 0 }} hari
+    </p>
+</div>
+
                                 <div class="col-md-6 mb-3">
                                     <label class="text-muted">Email</label>
                                     <p>{{ $employee['email'] }}</p>
