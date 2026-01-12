@@ -7,6 +7,11 @@
 
     <title>@yield('title', config('app.name', 'Employee Management System'))</title>
 
+
+
+    <!-- HTML5 QR Code Scanner -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
@@ -167,6 +172,18 @@
             right: 20px;
             z-index: 1050;
         }
+
+        @media (max-width: 768px) {
+            .scanner-container {
+                transform: scale(0.9);
+            }
+        }
+
+        /* Animation untuk scan line */
+        @keyframes scan {
+            0% { top: 0%; }
+            100% { top: 100%; }
+        }
     </style>
 
     @stack('styles')
@@ -292,12 +309,22 @@
                 </li>
                 @endif
 
+                <!-- QR SCANNER -->
+                @if(in_array($role, ['admin', 'manager']))
+                <li class="nav-item">
+                    <a class="nav-link {{ Request::is('barcode*') ? 'active' : '' }}" href="{{ route('barcode.scanner') }}">
+                        <i class="fas fa-qrcode"></i>
+                        <span>QR Scanner</span>
+                    </a>
+                </li>
+                @endif
+
                 <!-- Attendance -->
-                <!-- <li class="nav-item">
+                <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('attendance.*') ? 'active' : '' }}" href="{{ route('attendance.dashboard') }}">
                         <i class="fas fa-clock me-2"></i> Attendance
                     </a>
-                </li> -->
+                </li>
 
                 <!-- Leave Management -->
                 <li class="nav-item">

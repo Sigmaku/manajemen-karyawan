@@ -18,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'role' => \App\Http\Middleware\CheckRole::class,
             'attendance.access' => \App\Http\Middleware\AttendanceAccess::class,
+            'check.attendance' => \App\Http\Middleware\CheckAttendance::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

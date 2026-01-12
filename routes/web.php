@@ -65,7 +65,7 @@ Route::middleware(['auth.check'])->group(function () {
         Route::put('/{id}', [EmployeeController::class, 'update'])->name('update');
         Route::delete('/{id}', [EmployeeController::class, 'destroy'])->name('destroy');
 
-        // Account & Password Management (Fitur Baru Lo)
+        // Account & Password Management
         Route::post('/{id}/create-account', [EmployeeController::class, 'createAccount'])->name('create-account');
         Route::post('/{id}/reset-password', [EmployeeController::class, 'resetPassword'])->name('reset-password');
         Route::post('/{id}/update-password', [EmployeeController::class, 'updatePassword'])->name('update-password');
@@ -78,9 +78,8 @@ Route::middleware(['auth.check'])->group(function () {
 
     // ==================== ATTENDANCE ROUTES ====================
     Route::prefix('attendance')->name('attendance.')->group(function () {
+        // Dashboard attendance
         Route::get('/dashboard', [AttendanceController::class, 'dashboard'])->name('dashboard');
-        Route::get('/report', [AttendanceController::class, 'report'])->name('report');
-        Route::get('/history', [AttendanceController::class, 'history'])->name('history');
 
         // Check-in & Check-out khusus karyawan
         Route::middleware(['role:employee'])->group(function () {
@@ -88,13 +87,39 @@ Route::middleware(['auth.check'])->group(function () {
             Route::post('/check-out', [AttendanceController::class, 'checkOut'])->name('check-out');
         });
 
+        // Report & History
+        Route::get('/report', [AttendanceController::class, 'report'])->name('report');
+        Route::get('/history', [AttendanceController::class, 'history'])->name('history');
+
         // Manual entry hanya untuk admin
         Route::middleware(['role:admin'])->post('/manual', [AttendanceController::class, 'manualEntry'])->name('manual');
     });
 
+    // ==================== BARCODE ATTENDANCE ROUTES ====================
+    Route::prefix('barcode')->name('barcode.')->group(function () {
+
+        // Employee: Generate barcode after check-in
+        Route::middleware(['role:employee'])->group(function () {
+            Route::post('/generate-checkin', [AttendanceController::class, 'generateCheckInBarcode'])->name('generate.checkin');
+            Route::get('/my-barcode', [AttendanceController::class, 'showEmployeeBarcode'])->name('employee.view');
+        });
+
+        // Admin: Verify barcode scanner
+        Route::middleware(['role:admin,manager'])->group(function () {
+            Route::get('/verification-history', [AttendanceController::class, 'barcodeVerificationHistory'])->name('verification.history');
+            Route::get('/scanner', [AttendanceController::class, 'showBarcodeScanner'])->name('scanner');
+            Route::post('/verify-checkin', [AttendanceController::class, 'verifyCheckInBarcode'])->name('verify.checkin');
+        });
+
+        // General barcode info page
+        Route::get('/info', function() {
+            $user = session('user');
+            return view('attendance.barcode-info', ['role' => $user['role'] ?? 'employee']);
+        })->name('info');
+    });
+
     // ==================== LEAVE MANAGEMENT ROUTES ====================
     Route::prefix('leaves')->name('leaves.')->group(function () {
-
 
         // Halaman utama cuti
         // Admin & Manager: lihat semua cuti
@@ -102,15 +127,14 @@ Route::middleware(['auth.check'])->group(function () {
 
         // Employee: lihat cuti sendiri
         Route::middleware(['role:employee'])->get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
-        Route::middleware(['role:employee'])
+          // Route API untuk AJAX/Realtime
+          Route::middleware(['role:employee'])
             ->get('/api/my', [LeaveController::class, 'apiMyLeaves'])
             ->name('api.my');
 
-        Route::middleware(['role:admin,manager'])
+          Route::middleware(['role:admin,manager'])
             ->get('/api/all', [LeaveController::class, 'apiAllLeaves'])
             ->name('api.all');
-
-
 
         // Ajukan cuti baru - semua role
         Route::get('/create', [LeaveController::class, 'create'])->name('create');
@@ -134,7 +158,6 @@ Route::middleware(['auth.check'])->group(function () {
             Route::post('/{id}/reject', [LeaveController::class, 'reject'])->name('reject');
         });
     });
-
 
     // ==================== REPORTS (Admin & Manager Only) ====================
     Route::middleware(['role:admin,manager'])->prefix('reports')->name('reports.')->group(function () {

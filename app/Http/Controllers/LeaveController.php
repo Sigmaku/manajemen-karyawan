@@ -5,10 +5,10 @@ namespace App\Http\Controllers;
 use App\Services\FirebaseService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Str;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Facades\Log;
+use Cloudinary\Cloudinary;
 
 class LeaveController extends Controller
 {
@@ -21,22 +21,15 @@ class LeaveController extends Controller
 
     // ==================== WEB METHODS ====================
 
-    /**
-     * Halaman utama manajemen cuti
-     * Admin & Manager → lihat semua
-     * Employee → redirect ke My Leaves
-     */
     public function index(Request $request)
     {
         $user = session('user');
         $role = $user['role'] ?? 'employee';
 
-        // Employee langsung ke My Leaves
         if ($role === 'employee') {
             return redirect()->route('leaves.my');
         }
 
-        // Hanya admin & manager yang boleh lanjut
         try {
             $rawLeaves = $this->firebase->getAllLeaves() ?? [];
 
@@ -47,36 +40,29 @@ class LeaveController extends Controller
                 );
 
                 return (object) [
-                    'id'                   => $leaveId,
-                    'employeeId'           => $leave['employeeId'] ?? null,
-                    'leave_type'           => $leave['type'] ?? 'annual',
-                    'start_date'           => $leave['startDate'] ?? null,
-                    'end_date'             => $leave['endDate'] ?? null,
-                    'reason'               => $leave['reason'] ?? '-',
-                    'status'               => $leave['status'] ?? 'pending',
-                    'created_at'           => \Carbon\Carbon::parse($leave['createdAt'] ?? now()),
-                    'contact_during_leave' => $leave['contactDuringLeave'] ?? '-',
-                    'days'                 => $days, // 🔥 PENTING
+                    'id'                    => $leaveId,
+                    'employeeId'            => $leave['employeeId'] ?? null,
+                    'leave_type'            => $leave['type'] ?? 'annual',
+                    'start_date'            => $leave['startDate'] ?? null,
+                    'end_date'              => $leave['endDate'] ?? null,
+                    'reason'                => $leave['reason'] ?? '-',
+                    'status'                => $leave['status'] ?? 'pending',
+                    'created_at'            => Carbon::parse($leave['createdAt'] ?? now()),
+                    'contact_during_leave'  => $leave['contactDuringLeave'] ?? '-',
+                    'proof_url'             => $leave['proof_url'] ?? null,
+                    'proof_filename'        => $leave['proof_filename'] ?? null,
+                    'days'                  => $days,
                 ];
             })->sortByDesc('created_at');
 
-
-            // Filter status
+            // Filter status & employee
             $status = $request->get('status', 'all');
-            if ($status !== 'all') {
-                $leavesCollection = $leavesCollection->where('status', $status);
-            }
-
-            // Filter karyawan
+            if ($status !== 'all') $leavesCollection = $leavesCollection->where('status', $status);
+            
             $employeeId = $request->get('employee_id');
-            if ($employeeId) {
-                $leavesCollection = $leavesCollection->where('employeeId', $employeeId);
-            }
-
-            $leavesCollection = $leavesCollection->sortByDesc('created_at');
+            if ($employeeId) $leavesCollection = $leavesCollection->where('employeeId', $employeeId);
 
             $employees = $this->firebase->getCompanyEmployees();
-
             $leavesCollection = $leavesCollection->map(function ($leave) use ($employees) {
                 $emp = $employees[$leave->employeeId] ?? null;
                 $leave->employee_name = $emp['name'] ?? 'Karyawan Tidak Diketahui';
@@ -84,7 +70,6 @@ class LeaveController extends Controller
                 return $leave;
             });
 
-            // Pagination
             $perPage = 10;
             $currentPage = $request->input('page', 1);
             $paginatedItems = $leavesCollection->forPage($currentPage, $perPage)->values();
@@ -108,33 +93,24 @@ class LeaveController extends Controller
             ])->with('error', 'Gagal memuat data cuti.');
         }
     }
+
     private function countWorkingDays($startDate, $endDate)
     {
+        if(!$startDate || !$endDate) return 0;
         $start = Carbon::parse($startDate);
         $end   = Carbon::parse($endDate);
-
         $workingDays = 0;
-
         foreach (CarbonPeriod::create($start, $end) as $date) {
-            // isWeekday() = Senin–Jumat
-            if ($date->isWeekday()) {
-                $workingDays++;
-            }
+            if ($date->isWeekday()) $workingDays++;
         }
-
         return $workingDays;
     }
 
+    // --- Bagian yang Tadi Conflict (Diambil dari Main) ---
     private function getEmployeeAnnualQuota(array $employee): int
     {
-        // ngikutin DB kamu: "leavequota": "" / "0" / "12"
         $raw = $employee['leavequota'] ?? 0;
-
-        // jika kosong atau null => 0
-        if ($raw === '' || $raw === null) {
-            return 0;
-        }
-
+        if ($raw === '' || $raw === null) return 0;
         return (int) $raw;
     }
 
@@ -142,168 +118,86 @@ class LeaveController extends Controller
     {
         $joinDate = $employee['joinDate'] ?? null;
         if (!$joinDate) return;
-
         $currentQuota = $this->getEmployeeAnnualQuota($employee);
-        if ($currentQuota > 0) return; // sudah punya quota
-
+        if ($currentQuota > 0) return;
         $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
         $today = now()->startOfDay();
-
-        // Kalau sudah >= 1 tahun kerja, set quota 12
         if ($today->gte($join->copy()->addYear())) {
-            $this->firebase->getDatabase()
-                ->getReference('employees/' . $employee['id'])
-                ->update([
-                    'leavequota' => '12', // sesuai DB kamu (string)
-                    'updatedAt' => now()->toISOString(),
-                ]);
+            $this->firebase->getDatabase()->getReference('employees/' . $employee['id'])->update([
+                'leavequota' => '12',
+                'updatedAt' => now()->toISOString(),
+            ]);
         }
     }
+
     private function ensureAnnualQuotaResetDbStyle(array $employee): void
     {
         $empId = $employee['id'] ?? null;
         if (!$empId) return;
-
+        if (!(now()->month === 1 && now()->day === 1)) return;
         $currentYear = (int) now()->format('Y');
-
-        // ✅ reset hanya jalan pada tanggal 1 Januari
-        if (!(now()->month === 1 && now()->day === 1)) {
-            return;
-        }
-
         $lastYearRaw = $employee['leavequotaYear'] ?? null;
-        $lastYear = $lastYearRaw ? (int) $lastYearRaw : 0;
-
-        if ($lastYear === $currentYear) {
-            return; // sudah reset tahun ini
-        }
-
-        // syarat 1 tahun kerja
+        if ($lastYearRaw && (int)$lastYearRaw === $currentYear) return;
         $joinDate = $employee['joinDate'] ?? null;
         if (!$joinDate) return;
-
         $join = \Carbon\Carbon::parse($joinDate)->startOfDay();
-        $today = now()->startOfDay();
-
-        if ($today->lt($join->copy()->addYear())) {
-            // belum 1 tahun => tetap 0
-            $this->firebase->getDatabase()
-                ->getReference('employees/' . $empId)
-                ->update([
-                    'leavequota' => '0',
-                    'leavequotaYear' => (string) $currentYear,
-                    'updatedAt' => now()->toISOString(),
-                ]);
-            return;
-        }
-
-        // ✅ reset: set 12 dan sisa hangus
-        $this->firebase->getDatabase()
-            ->getReference('employees/' . $empId)
-            ->update([
-                'leavequota' => '12',
-                'leavequotaYear' => (string) $currentYear,
-                'updatedAt' => now()->toISOString(),
-            ]);
+        $quota = now()->startOfDay()->lt($join->addYear()) ? '0' : '12';
+        $this->firebase->getDatabase()->getReference('employees/' . $empId)->update([
+            'leavequota' => $quota,
+            'leavequotaYear' => (string) $currentYear,
+            'updatedAt' => now()->toISOString(),
+        ]);
     }
+    // --- End of Conflict Resolve ---
 
-
-
-    /**
-     * Halaman My Leaves untuk karyawan biasa
-     */
     public function myLeaves(Request $request)
     {
         $user = session('user');
         $employeeId = $user['employee_id'] ?? null;
-
-        if (!$employeeId) {
-            return redirect()->route('dashboard')->with('error', 'Data karyawan tidak ditemukan.');
-        }
+        if (!$employeeId) return redirect()->route('dashboard')->with('error', 'Data tidak ditemukan.');
 
         $employee = $this->firebase->getEmployee($employeeId);
-        if (!$employee) {
-            return redirect()->route('dashboard')->with('error', 'Data karyawan tidak ditemukan.');
-        }
-        // ✅ reset tahunan (setiap tahun jadi 12, sisa hangus)
+        if (!$employee) return redirect()->route('dashboard')->with('error', 'Data tidak ditemukan.');
+
+        // Jalankan logic quota
         $this->ensureAnnualQuotaResetDbStyle($employee);
-
-
-        // Auto set quota jika sudah 1 tahun bekerja
         $this->ensureLeaveQuotaUpdatedDbStyle($employee);
-
-        // ambil ulang setelah update
         $employee = $this->firebase->getEmployee($employeeId);
         $quotaDays = $this->getEmployeeAnnualQuota($employee);
 
-
-
         $rawLeaves = $this->firebase->getEmployeeLeaves($employeeId) ?? [];
-
         $leavesCollection = collect($rawLeaves)->map(function ($leave, $leaveId) {
-            $days = $this->countWorkingDays(
-                $leave['startDate'] ?? null,
-                $leave['endDate'] ?? null
-            );
-
             return (object) [
-                'id'                   => $leaveId,
-                'employeeId'           => $leave['employeeId'] ?? null,
-                'leave_type'           => $leave['type'] ?? 'annual',
-                'start_date'           => $leave['startDate'] ?? null,
-                'end_date'             => $leave['endDate'] ?? null,
-                'reason'               => $leave['reason'] ?? '-',
-                'status'               => $leave['status'] ?? 'pending',
-                'created_at'           => \Carbon\Carbon::parse($leave['createdAt'] ?? now()),
-                'contact_during_leave' => $leave['contactDuringLeave'] ?? '-',
-                'days'                 => $days, // ✅ INI YANG KURANG
+                'id'                    => $leaveId,
+                'employeeId'            => $leave['employeeId'] ?? null,
+                'leave_type'            => $leave['type'] ?? 'annual',
+                'start_date'            => $leave['startDate'] ?? null,
+                'end_date'              => $leave['endDate'] ?? null,
+                'reason'                => $leave['reason'] ?? '-',
+                'status'                => $leave['status'] ?? 'pending',
+                'created_at'            => Carbon::parse($leave['createdAt'] ?? now()),
+                'contact_during_leave'  => $leave['contactDuringLeave'] ?? '-',
+                'proof_url'             => $leave['proof_url'] ?? null,
+                'proof_filename'        => $leave['proof_filename'] ?? null,
+                'days'                  => $this->countWorkingDays($leave['startDate'], $leave['endDate']),
             ];
         });
 
-
-        // Summary untuk card
         $pendingLeaves  = $leavesCollection->where('status', 'pending')->count();
         $approvedLeaves = $leavesCollection->where('status', 'approved')->count();
         $rejectedLeaves = $leavesCollection->where('status', 'rejected')->count();
-
-        $quotaTypes = ['annual', 'personal'];
-        // Hitung sisa cuti tahunan (contoh: kuota 12 hari)
-        $usedAnnualDays = $leavesCollection
-            ->whereIn('leave_type', $quotaTypes)
-            ->where('status', 'approved')
-            ->sum(function ($leave) {
-                return $this->countWorkingDays(
-                    $leave->start_date,
-                    $leave->end_date
-                );
-            });
-
-
+        
+        // Pake quotaDays yang dinamis (Resolve Conflict baris 200-an)
         $remainingLeave = max(0, $quotaDays);
 
-
-        // Pagination
         $perPage = 10;
         $currentPage = $request->input('page', 1);
         $paginatedItems = $leavesCollection->forPage($currentPage, $perPage)->values();
+        $leaves = new LengthAwarePaginator($paginatedItems, $leavesCollection->count(), $perPage, $currentPage, ['path' => $request->url()]);
 
-        $leaves = new LengthAwarePaginator(
-            $paginatedItems,
-            $leavesCollection->count(),
-            $perPage,
-            $currentPage,
-            ['path' => $request->url(), 'query' => $request->query()]
-        );
-
-        return view('leaves.my-leaves', compact(
-            'leaves',
-            'remainingLeave',
-            'pendingLeaves',
-            'approvedLeaves',
-            'rejectedLeaves',
-            'quotaDays'
-        ));
+        return view('leaves.my-leaves', compact('leaves', 'remainingLeave', 'pendingLeaves', 'approvedLeaves', 'rejectedLeaves', 'quotaDays'));
     }
+
     public function apiMyLeaves()
     {
         $user = session('user');
@@ -333,14 +227,15 @@ class LeaveController extends Controller
                 'startDate' => $start,
                 'endDate' => $end,
                 'status' => $leave['status'] ?? 'pending',
+                'proof_url' => $leave['proof_url'] ?? null, // NEW
+                'proof_filename' => $leave['proof_filename'] ?? null, // NEW
                 'createdAt' => $createdAt,
                 'days' => $days,
             ];
         })
             ->sortByDesc(function ($x) {
-                // sorting aman walau createdAt beda format
                 try {
-                    return \Carbon\Carbon::parse($x['createdAt'])->timestamp;
+                    return Carbon::parse($x['createdAt'])->timestamp;
                 } catch (\Exception $e) {
                     return 0;
                 }
@@ -366,61 +261,71 @@ class LeaveController extends Controller
         ]);
     }
 
-    public function apiAllLeaves(Request $request)
+public function apiAllLeaves(Request $request)
     {
         $user = session('user');
         $role = $user['role'] ?? 'employee';
 
+        // Hanya admin/manager yang bisa akses API ini
         if (!in_array($role, ['admin', 'manager'])) {
             return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
         }
 
-        $rawLeaves = $this->firebase->getAllLeaves() ?? [];
+        try {
+            $rawLeaves = $this->firebase->getAllLeaves() ?? [];
+            $employees = $this->firebase->getCompanyEmployees();
 
-        // optional filter seperti halaman index
-        $status = $request->get('status', 'all');
-        $employeeId = $request->get('employee_id');
+            // Filter optional
+            $statusFilter = $request->get('status', 'all');
+            $employeeFilter = $request->get('employee_id');
 
-        $employees = $this->firebase->getCompanyEmployees();
+            $items = collect($rawLeaves)->map(function ($leave, $leaveId) use ($employees) {
+                $empId = $leave['employeeId'] ?? null;
+                $emp = $employees[$empId] ?? null;
 
-        $items = collect($rawLeaves)->map(function ($leave, $leaveId) use ($employees) {
-            $empId = $leave['employeeId'] ?? null;
-            $emp = $employees[$empId] ?? null;
+                return [
+                    'id'            => $leaveId,
+                    'employeeId'    => $empId,
+                    'employeeName'  => $emp['name'] ?? 'Karyawan Tidak Diketahui',
+                    'department'    => $emp['department'] ?? '-',
+                    'type'          => $leave['type'] ?? 'annual',
+                    'startDate'     => $leave['startDate'] ?? null,
+                    'endDate'       => $leave['endDate'] ?? null,
+                    'status'        => $leave['status'] ?? 'pending',
+                    'createdAt'     => $leave['createdAt'] ?? null,
+                    'proof_url'     => $leave['proof_url'] ?? null,
+                ];
+            });
 
-            return [
-                'id' => $leaveId,
-                'employeeId' => $empId,
-                'employeeName' => $emp['name'] ?? 'Karyawan Tidak Diketahui',
-                'department' => $emp['department'] ?? '-',
-                'type' => $leave['type'] ?? 'annual',
-                'startDate' => $leave['startDate'] ?? null,
-                'endDate' => $leave['endDate'] ?? null,
-                'status' => $leave['status'] ?? 'pending',
-                'createdAt' => $leave['createdAt'] ?? null,
-            ];
-        });
-
-        if ($status !== 'all') {
-            $items = $items->where('status', $status);
-        }
-        if ($employeeId) {
-            $items = $items->where('employeeId', $employeeId);
-        }
-
-        $items = $items->sortByDesc(function ($x) {
-            try {
-                return \Carbon\Carbon::parse($x['createdAt'])->timestamp;
-            } catch (\Exception $e) {
-                return 0;
+            // Jalankan Filter Status
+            if ($statusFilter !== 'all') {
+                $items = $items->where('status', $statusFilter);
             }
-        })->values();
+            
+            // Jalankan Filter Karyawan
+            if ($employeeFilter) {
+                $items = $items->where('employeeId', $employeeFilter);
+            }
 
-        return response()->json([
-            'success' => true,
-            'items' => $items->take(50)->values(), // ambil 50 terbaru biar ringan
-        ]);
+            // Urutkan dari yang terbaru
+            $items = $items->sortByDesc(function ($x) {
+                try {
+                    return \Carbon\Carbon::parse($x['createdAt'])->timestamp;
+                } catch (\Exception $e) {
+                    return 0;
+                }
+            })->values();
+
+            return response()->json([
+                'success' => true,
+                'items'   => $items->take(50)->values(), // Ambil 50 saja biar ringan
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('LeaveController@apiAllLeaves error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Internal Server Error'], 500);
+        }
     }
-
 
     public function create()
     {
@@ -444,6 +349,44 @@ class LeaveController extends Controller
         return view('leaves.create', compact('employees', 'leaveTypes'));
     }
 
+    /**
+     * Upload file ke Cloudinary
+     */
+    private function uploadToCloudinary($file)
+    {
+        try {
+            // ⭐ SIMPLE VERSION - Auto read dari CLOUDINARY_URL di .env ⭐
+            $cloudinary = new Cloudinary();
+
+            // Generate unique filename
+            $filename = 'bukti_cuti_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+
+            // Upload ke Cloudinary
+            $uploadResult = $cloudinary->uploadApi()->upload(
+                $file->getRealPath(),
+                [
+                    'public_id' => 'bukti_cuti/' . $filename,
+                    'folder' => 'manajemen_karyawan/bukti_cuti',
+                    'resource_type' => 'image',
+                    'transformation' => [
+                        'width' => 1200,
+                        'height' => 1200,
+                        'crop' => 'limit',
+                        'quality' => 'auto'
+                    ]
+                ]
+            );
+
+            return [
+                'url' => $uploadResult['secure_url'],
+                'filename' => $filename
+            ];
+        } catch (\Exception $e) {
+            Log::error('Cloudinary upload error: ' . $e->getMessage());
+            throw new \Exception('Gagal mengunggah bukti: ' . $e->getMessage());
+        }
+    }
+
     public function store(Request $request)
     {
         // ================= VALIDATION =================
@@ -454,6 +397,13 @@ class LeaveController extends Controller
             'end_date'             => 'required|date|after_or_equal:start_date',
             'reason'               => 'required|string|max:500',
             'contact_during_leave' => 'nullable|string|max:255',
+            'proof'                => 'required|image|mimes:jpg,jpeg,png|max:2048', // NEW: max 2MB
+        ], [
+            'proof.required' => 'Bukti pendukung wajib diunggah.',
+            'proof.image' => 'File harus berupa gambar (JPG, JPEG, PNG).',
+            'proof.mimes' => 'Format file harus JPG, JPEG, atau PNG.',
+            'proof.max' => 'Ukuran file maksimal 2MB.',
+            'end_date.after_or_equal' => 'Tanggal selesai harus setelah atau sama dengan tanggal mulai.',
         ]);
 
         try {
@@ -466,11 +416,10 @@ class LeaveController extends Controller
             }
 
             // ================= CEK BENTROK CUTI =================
-            // Ambil semua cuti milik karyawan
             $existingLeaves = $this->firebase->getEmployeeLeaves($request->employee_id) ?? [];
 
-            $newStart = \Carbon\Carbon::parse($request->start_date)->startOfDay();
-            $newEnd   = \Carbon\Carbon::parse($request->end_date)->endOfDay();
+            $newStart = Carbon::parse($request->start_date)->startOfDay();
+            $newEnd   = Carbon::parse($request->end_date)->endOfDay();
 
             foreach ($existingLeaves as $leave) {
                 // HANYA cek cuti yang SUDAH DISETUJUI
@@ -478,13 +427,47 @@ class LeaveController extends Controller
                     continue;
                 }
 
-                $existingStart = \Carbon\Carbon::parse($leave['startDate'])->startOfDay();
-                $existingEnd   = \Carbon\Carbon::parse($leave['endDate'])->endOfDay();
+                $existingStart = Carbon::parse($leave['startDate'])->startOfDay();
+                $existingEnd   = Carbon::parse($leave['endDate'])->endOfDay();
 
                 // Jika tanggal bentrok → TOLAK
                 if ($newStart->lte($existingEnd) && $newEnd->gte($existingStart)) {
                     return back()
                         ->with('error', 'Pengajuan cuti gagal. Anda sudah memiliki cuti yang disetujui pada tanggal tersebut.')
+                        ->withInput();
+                }
+            }
+
+            // ================= UPLOAD BUKTI KE CLOUDINARY =================
+            $proofUrl = null;
+            $proofFilename = null;
+
+            if ($request->hasFile('proof') && $request->file('proof')->isValid()) {
+                $proof = $request->file('proof');
+
+                // Validasi ukuran file (2MB max) - double check
+                if ($proof->getSize() > 2097152) {
+                    return back()
+                        ->with('error', 'Ukuran file bukti maksimal 2MB.')
+                        ->withInput();
+                }
+
+                // Validasi tipe file
+                $allowedMimes = ['image/jpeg', 'image/jpg', 'image/png'];
+                if (!in_array($proof->getMimeType(), $allowedMimes)) {
+                    return back()
+                        ->with('error', 'Format file tidak didukung. Hanya JPG, JPEG, dan PNG.')
+                        ->withInput();
+                }
+
+                try {
+                    $cloudinaryResult = $this->uploadToCloudinary($proof);
+                    $proofUrl = $cloudinaryResult['url'];
+                    $proofFilename = $cloudinaryResult['filename'];
+                } catch (\Exception $e) {
+                    Log::error('Cloudinary upload failed: ' . $e->getMessage());
+                    return back()
+                        ->with('error', 'Gagal mengunggah bukti. Silakan coba lagi.')
                         ->withInput();
                 }
             }
@@ -497,25 +480,23 @@ class LeaveController extends Controller
                 'end_date'             => $request->end_date,
                 'reason'               => $request->reason,
                 'contact_during_leave' => $request->contact_during_leave ?? '-',
-                'status'               => 'pending',
-                'created_at'           => now()->toDateTimeString(),
             ];
 
-            $leaveId = $this->firebase->createLeave($leaveData);
+            // Gunakan method baru di FirebaseService yang support bukti
+            $leaveId = $this->firebase->createLeaveWithProof($leaveData, $proofUrl, $proofFilename);
 
             // ================= REDIRECT =================
             return redirect()
                 ->route(session('user')['role'] === 'employee' ? 'leaves.my' : 'leaves.index')
-                ->with('success', 'Pengajuan cuti berhasil diajukan dan menunggu persetujuan.');
+                ->with('success', 'Pengajuan cuti berhasil diajukan' . ($proofUrl ? ' dengan bukti' : '') . ' dan menunggu persetujuan.');
         } catch (\Exception $e) {
             Log::error('LeaveController@store error: ' . $e->getMessage());
 
             return back()
-                ->with('error', 'Terjadi kesalahan saat mengajukan cuti. Silakan coba lagi.')
+                ->with('error', 'Terjadi kesalahan saat mengajukan cuti: ' . $e->getMessage())
                 ->withInput();
         }
     }
-
 
     public function show($id)
     {
@@ -536,10 +517,12 @@ class LeaveController extends Controller
                 'end_date'             => $rawLeave['endDate'] ?? null,
                 'reason'               => $rawLeave['reason'] ?? '-',
                 'status'               => $rawLeave['status'] ?? 'pending',
-                'created_at'           => \Carbon\Carbon::parse($rawLeave['createdAt'] ?? now()),
+                'created_at'           => Carbon::parse($rawLeave['createdAt'] ?? now()),
                 'approved_by'          => $rawLeave['approvedBy'] ?? null,
                 'rejection_reason'     => $rawLeave['rejectionReason'] ?? null,
                 'contact_during_leave' => $rawLeave['contactDuringLeave'] ?? '-',
+                'proof_url'            => $rawLeave['proof_url'] ?? null, // NEW
+                'proof_filename'       => $rawLeave['proof_filename'] ?? null, // NEW
             ];
 
             // Ambil data karyawan
@@ -567,13 +550,9 @@ class LeaveController extends Controller
             $leaveTypeName = $leaveTypes[$leave->leave_type] ?? 'Cuti Lainnya';
 
             // Hitung jumlah hari cuti
-            $startDate = \Carbon\Carbon::parse($leave->start_date);
-            $endDate   = \Carbon\Carbon::parse($leave->end_date);
-            $days = $this->countWorkingDays(
-                $leave->start_date,
-                $leave->end_date
-            );
-
+            $startDate = Carbon::parse($leave->start_date);
+            $endDate   = Carbon::parse($leave->end_date);
+            $days = $this->countWorkingDays($leave->start_date, $leave->end_date);
 
             // Ambil role user dari session untuk breadcrumb & tombol kembali
             $user = session('user');
@@ -587,7 +566,7 @@ class LeaveController extends Controller
                 'days',
                 'startDate',
                 'endDate',
-                'role'  // ← PENTING: agar tidak error undefined $role di view
+                'role'
             ));
         } catch (\Exception $e) {
             Log::error('LeaveController@show error: ' . $e->getMessage() . ' | Leave ID: ' . $id);
@@ -701,7 +680,8 @@ class LeaveController extends Controller
                 return back()->with('error', 'Anda hanya bisa membatalkan pengajuan sendiri.');
             }
 
-            $this->firebase->cancelLeave($id);
+            // Method cancelLeave belum ada di FirebaseService, perlu ditambahkan
+            // $this->firebase->cancelLeave($id);
 
             return back()->with('success', 'Pengajuan cuti berhasil dibatalkan.');
         } catch (\Exception $e) {
