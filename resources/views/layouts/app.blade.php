@@ -323,6 +323,22 @@
                 </li>
                 @endif
             </ul>
+            @php
+    try {
+        $fb = app(\App\Services\FirebaseService::class);
+        $emps = $fb->getCompanyEmployees();
+        $totalEmp = is_array($emps) ? count($emps) : 0;
+
+        $todayAtt = $fb->getTodayAttendance();
+        $presentCount = is_array($todayAtt) ? count($todayAtt) : 0;
+
+        $absentCount = max(0, $totalEmp - $presentCount);
+    } catch (\Throwable $e) {
+        $presentCount = 0;
+        $absentCount = 0;
+    }
+@endphp
+
 
             <!-- Quick Stats -->
             <div class="mt-5 p-3 bg-light rounded">
@@ -330,11 +346,11 @@
                 <div class="row mt-2">
                     <div class="col-6">
                         <small>Present</small>
-                        <h6 class="mb-0 text-success" id="todayPresent">0</h6>
+                        <h6 class="mb-0 text-success" id="todayPresent">{{ $presentCount }}</h6>
                     </div>
                     <div class="col-6">
                         <small>Absent</small>
-                        <h6 class="mb-0 text-danger" id="todayAbsent">0</h6>
+                        <h6 class="mb-0 text-danger" id="todayAbsent">{{ $absentCount }}</h6>
                     </div>
                 </div>
             </div>
@@ -402,9 +418,9 @@
             const todayPresentEl = document.getElementById('todayPresent');
             const todayAbsentEl = document.getElementById('todayAbsent');
 
-            if (todayPresentEl && todayAbsentEl) {
-                fetchTodayStats();
-            }
+            // if (todayPresentEl && todayAbsentEl) {
+            //     fetchTodayStats();
+            // }
         });
 
         // Fetch today's attendance statistics - SAFE VERSION
