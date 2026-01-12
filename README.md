@@ -1,59 +1,369 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Sistem Manajemen Karyawan - Absensi & Cuti
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Sistem manajemen karyawan berbasis web dengan fitur absensi real-time, pengajuan cuti dengan bukti wajib, dan reporting. Dibangun dengan Laravel 12, Firebase Realtime Database dan Cloudinary.
 
-## About Laravel
+## Spesifikasi Sistem
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+### Environment Requirements:
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+```
+PHP ^8.3
+Composer 2.4.1
+Node.js v22.19.0
+NPM 10.9.3
+Git 2.51.0
+Laravel Framework ^12.0
+Firebase Realtime Database
+Cloudinary (Untuk penyimpanan bukti)
+```
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Fitur Utama
 
-## Learning Laravel
+### Manajemen Karyawan
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+-   CRUD data karyawan dengan Firebase
+-   Multi-role: Admin, Manager, Employee
+-   Akun otomatis dengan Firebase Authentication
+-   Reset password oleh admin
+-   Live status kehadiran
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### Sistem Absensi Real-time
 
-## Laravel Sponsors
+-   Check-in/Check-out dengan timestamp
+-   Perhitungan otomatis:
+    -   Jam kerja normal (08:00-16:00)
+    -   Overtime (setelah 18:00)
+    -   Keterlambatan (late minutes)
+-   Live dashboard dengan status karyawan
+-   Riwayat absensi per bulan
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### Manajemen Cuti dengan Bukti Wajib
 
-### Premium Partners
+-   Pengajuan cuti dengan bukti pendukung wajib
+-   Format file: JPG, JPEG, PNG (maks. 2MB)
+-   Cloudinary integration - penyimpanan cloud aman
+-   Preview bukti - modal preview untuk admin
+-   Salin link - fitur khusus admin untuk audit
+-   Approval workflow multi-level
+-   Perhitungan hari kerja otomatis (exclude weekend)
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+### 📊 Reporting & Analytics
 
-## Contributing
+-   Dashboard statistik real-time
+-   Laporan absensi dengan filter
+-   Export data ke Excel/PDF
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## 🚀 Teknologi Stack
 
-## Code of Conduct
+### Backend:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+-   Laravel ^12.0 - PHP Framework modern
+-   Firebase Realtime Database - NoSQL real-time database
+-   Firebase Authentication - Secure user management
+-   Cloudinary API - Cloud storage untuk bukti cuti
+-   Carbon 3.x - Date & time manipulation
 
-## Security Vulnerabilities
+### Frontend:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+-   Tailwind CSS 4.0 - Utility-first CSS framework
+-   Font Awesome 6 - Icon library
+-   Vanilla JavaScript ES6 - Client-side operations
+-   Sweetalert2 - Beautiful notifications
 
-## License
+### Development & Deployment:
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+-   Composer 2.4.1 - PHP dependency manager
+-   NPM 10.9.3 - Node package manager
+-   Git 2.51.0 - Version control
+-   Vite 7.0.7 - Fast build tool
+-   Visual Studio Code - Recommended IDE
+
+## 📁 Struktur Proyek
+
+```
+management-karyawan/
+├── 📁 app/
+│   ├── 📁 Http/
+│   │   ├── 📁 Controllers/
+│   │   │   ├── AdminController.php           #  Kelola semua fungsi admin
+│   │   │   ├── AttendanceController.php      #  Handle absensi, checkin/out
+│   │   │   ├── AuthController.php            #  Login/logout, autentikasi
+│   │   │   ├── Controller.php                #  Controller base class
+│   │   │   ├── DashboardController.php       #  Tampilkan dashboard semua role
+│   │   │   ├── EmployeeController.php        #  CRUD data karyawan
+│   │   │   ├── LeaveController.php           #  Kelola pengajuan cuti + bukti
+│   │   │   ├── ProfileController.php         #  Update profil user
+│   │   │   ├── ReportController.php          #  Generate laporan PDF/Excel
+│   │   │   └── SettingsController.php        #  Pengaturan sistem
+│   │   ├── 📁 Middleware/
+│   │   └── 📁 Models/
+│   ├── 📁 Providers/
+│   └── 📁 Services/
+│       └── FirebaseService.php               #  Service untuk Firebase API
+├── 📁 bootstrap/                             #  Bootstrap aplikasi
+│   └── app.php
+├── 📁 config/                                #  Konfigurasi
+├── 📁 database/                              #  Database migrations
+├── 📁 public/                                #  File publik
+├── 📁 resources/
+│   ├── 📁 css/
+│   ├── 📁 js/
+│   └── 📁 views/                             #  VIEW FILES - Template Blade
+│       ├── 📁 admin/                         #  VIEWS ADMIN
+│       │   ├── admin-barcode-scanner.blade.php     #  Halaman scanner barcode admin
+│       │   ├── barcode-verification-history.blade.php #  Riwayat scan barcode
+│       │   ├── dashboard.blade.php           #  Dashboard admin (statistik)
+│       │   ├── scanner.blade.php             #  Interface scanner sederhana
+│       │   └── users.blade.php               #  Daftar semua user (admin view)
+│       ├── 📁 attendance/                    #  VIEWS ABSENSI
+│       │   ├── dashboard.blade.php           #  Overview absensi (status live)
+│       │   └── employee-barcode.blade.php    #  Tampilkan barcode karyawan untuk discan
+│       ├── 📁 auth/                          #  VIEWS AUTH
+│       │   └── login.blade.php               #  Halaman login
+│       ├── 📁 employees/                     #  VIEWS KARYAWAN
+│       │   ├── create.blade.php              #  Form tambah karyawan baru
+│       │   ├── dashboard.blade.php           #  Dashboard pribadi karyawan
+│       │   ├── edit.blade.php                #  Form edit data karyawan
+│       │   ├── index.blade.php               #  Daftar semua karyawan
+│       │   └── show.blade.php                #  Detail satu karyawan
+│       ├── 📁 layouts/                       #  LAYOUT TEMPLATES
+│       │   └── app.blade.php                 #  Layout utama (header, sidebar, footer)
+│       ├── 📁 leaves/                        #  VIEWS CUTI
+│       │   ├── create.blade.php              #  Form pengajuan cuti + upload bukti
+│       │   ├── index.blade.php               #  Daftar semua pengajuan cuti (admin)
+│       │   ├── my-leaves.blade.php           #  Daftar cuti saya (karyawan)
+│       │   └── show.blade.php                #  Detail cuti + preview bukti
+│       ├── 📁 manager/                       #  VIEWS MANAGER
+│       │   └── dashboard.blade.php           #  Dashboard manager (tim stats)
+│       ├── 📁 profile/                       #  VIEWS PROFILE
+│       │   └── show.blade.php                #  Halaman profil user
+│       ├── 📁 reports/                       #  VIEWS LAPORAN
+│       │   ├── attendance-pdf.blade.php      #  Template PDF untuk laporan absensi
+│       │   └── attendance.blade.php          #  Filter & hasil laporan absensi
+│       ├── 📁 settings/                      #  VIEWS SETTINGS
+│       │   └── index.blade.php               #  Halaman pengaturan sistem
+│       ├── dashboard.blade.php               #  Dashboard default (redirect based on role)
+│       └── welcome.blade.php                 #  Halaman landing/home
+├── 📁 routes/                                #  ROUTING
+│   ├── api.php                               #  API routes (JSON responses)
+│   ├── console.php                           #  Artisan command routes
+│   └── web.php                               #  Web routes (GET/POST requests)
+├── 📁 storage/                               #  FILE STORAGE
+│   ├── 📁 app/
+│   │   ├── 📁 firebase/
+│   │   │   └── credentials.json             #  Firebase service account key (JSON)
+│   │   ├── private/                         #  Private files
+│   │   └── public/                          #  Public files (bisa diakses via URL)
+│   └── logs/                                #  Log files aplikasi
+├── 📁 tests/                                 #  Testing
+├── .editorconfig
+├── .env.example                              #  Contoh file env
+├── .gitattributes
+├── .gitignore                               #  File-file yang diignore git
+├── artisan                                   #  CLI Laravel
+├── composer.json                            #  Konfigurasi dependencies PHP
+├── composer.lock                            #  Versi locked dependencies
+├── package-lock.json                        #  Versi locked npm
+├── package.json                             #  Konfigurasi dependencies JS
+├── phpunit.xml                              #  Konfigurasi testing
+├── README.md                                #  Dokumentasi proyek
+├── vite.config.js                           #  Konfigurasi build Vite
+```
+
+## ⚙️ Instalasi & Setup
+
+### 1. Clone & Setup Awal
+
+```bash
+# Clone repository
+git clone https://github.com/Sigmaku/manajemen-karyawan.git
+cd manajemen-karyawan
+
+# Install PHP dependencies
+composer install
+
+# Install Node.js dependencies (jika ada)
+npm install
+
+# Setup environment
+cp .env.example .env
+```
+
+### 2. Konfigurasi Firebase
+
+1. Buat project di [Firebase Console](https://console.firebase.google.com)
+2. Download service account (JSON) dari Project Settings > Service Accounts
+3. Simpan sebagai `storage/app/firebase/credentials.json`
+4. Update `.env`:
+
+```env
+FIREBASE_CREDENTIALS=storage/app/firebase/credentials.json
+FIREBASE_DATABASE_URL=https://[PROJECT-ID].firebasedatabase.app
+FIREBASE_COMPANY_ID=[YOUR_COMPANY_ID]
+```
+
+### 3. Konfigurasi Cloudinary (Untuk Bukti Cuti)
+
+1. Daftar di [Cloudinary](https://cloudinary.com)
+2. Dapatkan credentials dari Dashboard
+3. Update `.env`:
+
+```env
+# Format 1: Single URL (Recommended)
+CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
+
+# Format 2: Separate values
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+```
+
+### 4. Jalankan Development Server
+
+```bash
+# Start local server
+php artisan serve
+
+# Atau dengan port custom
+php artisan serve --port=8000
+```
+
+## 📖 Panduan Penggunaan
+
+## 🔐 Authentication System
+
+Sistem menggunakan Firebase Authentication dengan multi-role:
+
+-   Admin: Full system access
+-   Manager: Employee management & leave approval
+-   Employee: Personal attendance & leave requests
+
+### Login Flow:
+
+1. User memasukkan email dan password
+2. System melakukan authentication via Firebase
+3. Session dibuat berdasarkan role user
+4. User di-redirect ke dashboard yang sesuai
+
+### Untuk Karyawan:
+
+1. Login dengan akun karyawan
+2. Check-in saat datang kerja (setelah 08:00 = terlambat)
+3. Check-out saat pulang (otomatis hitung overtime)
+4. Ajukan cuti dengan:
+    - Pilih jenis cuti
+    - Isi tanggal dan alasan
+    - Upload bukti wajib (max 2MB)
+    - Submit dan tunggu approval
+5. Pantau status di "Pengajuan Cuti Saya"
+
+### Untuk Admin/Manager:
+
+1. Kelola karyawan - tambah/edit/hapus
+2. Review cuti - dengan preview bukti
+3. Approve/Reject - dengan alasan jika reject
+4. Salin link bukti - untuk keperluan audit/report
+5. Generate laporan - absensi & cuti
+6. Live monitoring - status kehadiran real-time
+
+## 🗃️ Struktur Data Firebase
+
+**Catatan Keamanan:** Struktur data Firebase tidak ditampilkan secara detail di sini untuk alasan keamanan. Sistem menggunakan Firebase Realtime Database dengan struktur yang dinamis dan terenkripsi. Jika Anda developer, lihat kode sumber di `app/Services/FirebaseService.php` untuk implementasi internal.
+
+### Contoh Penggunaan (Tanpa Detail Struktur):
+
+-   **LeaveRequests**: Menyimpan data pengajuan cuti dengan bukti, status approval, dan metadata.
+-   **Attendance**: Menyimpan data absensi harian dengan perhitungan overtime dan keterlambatan.
+
+## 🐛 Troubleshooting & Debug
+
+### Common Issues:
+
+1. Firebase Connection Failed
+
+```bash
+# Cek credentials
+ls -la storage/app/firebase/
+
+# Test connection
+php artisan tinker
+>>> app('App\Services\FirebaseService')->getDatabase()->getReference('test')->set(['status' => 'ok']);
+```
+
+2. Cloudinary Upload Error
+
+```bash
+# Cek .env variables
+echo $CLOUDINARY_URL
+
+# Test upload manual
+php -r "
+require 'vendor/autoload.php';
+\$cloudinary = new \Cloudinary\Cloudinary();
+echo '✅ Cloudinary Connected';
+"
+```
+
+3. File Upload Size Limit
+
+```bash
+# Cek PHP upload limits
+php -r "echo 'Upload: ' . ini_get('upload_max_filesize') . PHP_EOL;"
+php -r "echo 'Post: ' . ini_get('post_max_size') . PHP_EOL;"
+```
+
+### Debug Mode:
+
+```env
+# .env configuration
+APP_DEBUG=true
+APP_ENV=local
+LOG_CHANNEL=stack
+LOG_LEVEL=debug
+```
+
+## ❓ FAQ (Pertanyaan Umum)
+
+### Q: Bagaimana cara menjalankan proyek ini di lokal?
+
+A: Ikuti langkah-langkah di bagian "Instalasi & Setup". Pastikan semua dependencies terinstall dan konfigurasi Firebase/Cloudinary sudah benar.
+
+### Q: Mengapa absensi tidak tersimpan?
+
+A: Periksa koneksi Firebase. Jalankan `php artisan tinker` dan test koneksi seperti di bagian Troubleshooting.
+
+### Q: Bukti cuti tidak bisa diupload?
+
+A: Pastikan file JPG/PNG maksimal 2MB. Cek konfigurasi Cloudinary di .env dan koneksi internet.
+
+### Q: Bagaimana reset password karyawan?
+
+A: Admin dapat reset password melalui menu manajemen karyawan.
+
+### Q: Apa perbedaan role Admin, Manager, dan Employee?
+
+A: Admin: Full access. Manager: Kelola karyawan & approve cuti. Employee: Absensi & ajukan cuti pribadi.
+
+### Q: Mengapa overtime tidak terhitung?
+
+A: Overtime dihitung setelah jam 18:00. Pastikan check-out dilakukan setelah waktu tersebut.
+
+### Q: Bagaimana export laporan?
+
+A: Gunakan menu Reports. Pilih filter tanggal dan klik Export ke Excel/PDF.
+
+## 📄 Lisensi & Hak Cipta
+
+Proyek ini dilisensikan di bawah MIT License. Lihat file [LICENSE](LICENSE) untuk detail lengkap.
+
+Hak Cipta © 2026 Tim Pengembangan Sistem Manajemen Karyawan
+
+## 🙏 Credits & Acknowledgments
+
+-   Laravel Community - Amazing PHP framework
+-   Firebase Google - Real-time database solution
+-   Cloudinary - Cloud media management
+-   Tailwind CSS Team - Utility-first CSS framework
+-   All Contributors - Terima kasih atas kontribusi
+
+---
