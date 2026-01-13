@@ -626,120 +626,181 @@ class AttendanceController extends Controller
      * Verify check-in barcode (for admin scanning)
      */
     public function verifyCheckInBarcode(Request $request)
-    {
-        $user = session('user');
-        $role = $user['role'] ?? 'employee';
+{
+    $user = session('user');
+    $role = $user['role'] ?? 'employee';
 
-        if (!in_array($role, ['admin', 'manager'])) {
+    if (!in_array($role, ['admin', 'manager'])) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Only administrators can verify barcodes'
+        ], 403);
+    }
+
+    $validator = Validator::make($request->all(), [
+        'barcode_data' => 'required|string'
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Invalid barcode data'
+        ], 422);
+    }
+
+    try {
+        // 1) Normalisasi input (hapus whitespace termasuk newline)
+        $barcodeData = trim((string) $request->barcode_data);
+        $barcodeData = preg_replace('/\s+/', '', $barcodeData);
+
+        // 2) Validasi minimal: harus punya ":" dan secret md5 32 char di akhir
+        // Format yang kita dukung:
+        // emp_1571:1768261370:2026-01-13:06:27:e7a927bb01d0199d508d40fd795e9d25
+        // (note: jam mengandung ":" jadi total part bisa 6)
+        if (strlen($barcodeData) < 40) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only administrators can verify barcodes'
-            ], 403);
+                'message' => 'Invalid barcode format'
+            ], 400);
         }
 
-        $validator = Validator::make($request->all(), [
-            'barcode_data' => 'required|string'
+        // 3) Ambil secret = 32 char terakhir (md5)
+        $secret = substr($barcodeData, -32);
+
+        // Pastikan secret beneran hex 32 char
+        if (!preg_match('/^[a-f0-9]{32}$/i', $secret)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (secret)'
+            ], 400);
+        }
+
+        // 4) Payload = semua sebelum ":<secret>"
+        // (hapus 32 char secret + 1 char ":" sebelumnya)
+        $payload = substr($barcodeData, 0, -33);
+
+        // 5) Payload harus jadi 4 bagian: employeeId:timestamp:date:checkInTime
+        // Pakai limit 4 supaya jam "06:27" tetap utuh.
+        $parts = explode(':', $payload, 4);
+
+        if (count($parts) !== 4) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format'
+            ], 400);
+        }
+
+        [$employeeId, $timestamp, $date, $checkInTimeFromBarcode] = $parts;
+
+        // 6) Validasi basic field
+        $employeeId = trim($employeeId);
+        $timestamp = trim($timestamp);
+        $date = trim($date);
+        $checkInTimeFromBarcode = trim($checkInTimeFromBarcode);
+
+        if ($employeeId === '' || !ctype_digit($timestamp)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (employee/timestamp)'
+            ], 400);
+        }
+
+        // date format Y-m-d
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (date)'
+            ], 400);
+        }
+
+        // time format H:i (atau H:i:s kalau kamu mau support)
+        if (!preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $checkInTimeFromBarcode)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (time)'
+            ], 400);
+        }
+
+        // 7) Expired check (5 menit)
+        if ((time() - (int) $timestamp) > 300) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Barcode expired. Please generate a new one.',
+                'code' => 'BARCODE_EXPIRED'
+            ], 400);
+        }
+
+        // 8) Verify secret
+        $dataString = $employeeId . ':' . $timestamp . ':' . $date . ':' . $checkInTimeFromBarcode;
+        $expectedSecret = md5($dataString . env('BARCODE_SECRET', 'attendance_secret_2024'));
+
+        if (!hash_equals($expectedSecret, $secret)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode security code'
+            ], 400);
+        }
+
+        // 9) Ambil attendance record
+        $attendanceRef = $this->firebase->getDatabase()
+            ->getReference("attendances/{$this->firebase->getCompanyId()}/{$date}/{$employeeId}");
+
+        $attendance = $attendanceRef->getValue();
+
+        if (!$attendance || empty($attendance['checkIn'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No check-in record found for this date',
+                'code' => 'NO_CHECKIN_RECORD'
+            ], 400);
+        }
+
+        // 10) Harus pending
+        if (($attendance['status'] ?? '') !== 'pending') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Attendance is not pending (already verified or invalid).',
+                'code' => 'NOT_PENDING'
+            ], 400);
+        }
+
+        // 11) Tentukan present/late dari jam checkIn tersimpan di Firebase
+        $ci = \Carbon\Carbon::parse($date . ' ' . ($attendance['checkIn'] ?? $checkInTimeFromBarcode));
+        $officeStart = \Carbon\Carbon::parse($date . ' 08:00');
+        $finalStatus = $ci->gt($officeStart) ? 'late' : 'present';
+
+        // 12) Update attendance status final
+        $attendanceRef->update([
+            'status' => $finalStatus,
+            'updatedAt' => now()->toISOString(),
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid barcode data'
-            ], 422);
-        }
+        // 13) Log verification (optional)
+        $this->storeBarcodeVerification($employeeId, $barcodeData, $user['name'] ?? 'Admin');
 
-        try {
-            $barcodeData = trim($request->barcode_data);
-            $parts = explode(':', $barcodeData);
-
-            // ✅ wajib 5 parts
-            if (count($parts) !== 5) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid barcode format'
-                ], 400);
-            }
-
-            [$employeeId, $timestamp, $date, $checkInTimeFromBarcode, $secret] = $parts;
-
-            // expired 5 menit
-            if ((time() - (int)$timestamp) > 300) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Barcode expired. Please generate a new one.',
-                    'code' => 'BARCODE_EXPIRED'
-                ], 400);
-            }
-
-            // verify secret
-            $dataString = $employeeId . ':' . $timestamp . ':' . $date . ':' . $checkInTimeFromBarcode;
-            $expectedSecret = md5($dataString . env('BARCODE_SECRET', 'attendance_secret_2024'));
-
-            if ($secret !== $expectedSecret) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid barcode security code'
-                ], 400);
-            }
-
-            // ambil attendance record
-            $attendanceRef = $this->firebase->getDatabase()
-                ->getReference("attendances/{$this->firebase->getCompanyId()}/{$date}/{$employeeId}");
-
-            $attendance = $attendanceRef->getValue();
-
-            if (!$attendance || empty($attendance['checkIn'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No check-in record found for this date',
-                    'code' => 'NO_CHECKIN_RECORD'
-                ], 400);
-            }
-
-            // ✅ harus pending dulu
-            if (($attendance['status'] ?? '') !== 'pending') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Attendance is not pending (already verified or invalid).',
-                    'code' => 'NOT_PENDING'
-                ], 400);
-            }
-
-            // tentukan present/late dari jam checkIn yang tersimpan
-            $ci = \Carbon\Carbon::parse($date . ' ' . $attendance['checkIn']);
-            $officeStart = \Carbon\Carbon::parse($date . ' 08:00');
-            $finalStatus = $ci->gt($officeStart) ? 'late' : 'present';
-
-            // ✅ update attendance: set status final
-            $attendanceRef->update([
+        return response()->json([
+            'success' => true,
+            'message' => 'Check-in verified successfully',
+            'data' => [
+                'employee_id' => $employeeId,
+                'date' => $date,
+                'check_in_time' => $attendance['checkIn'],
                 'status' => $finalStatus,
-                'updatedAt' => now()->toISOString(),
-            ]);
+                'verified_by' => $user['name'] ?? 'Admin',
+                'verification_time' => now()->format('Y-m-d H:i:s'),
+                'attendance_data' => $attendance
+            ]
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Verify barcode error: ' . $e->getMessage());
 
-            // log verification (optional)
-            $this->storeBarcodeVerification($employeeId, $barcodeData, $user['name'] ?? 'Admin');
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Check-in verified successfully',
-                'data' => [
-                    'employee_id' => $employeeId,
-                    'date' => $date,
-                    'check_in_time' => $attendance['checkIn'],
-                    'status' => $finalStatus,
-                    'verified_by' => $user['name'] ?? 'Admin',
-                    'verification_time' => now()->format('Y-m-d H:i:s'),
-                    'attendance_data' => $attendance
-                ]
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Verify barcode error: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Verification failed: ' . $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'success' => false,
+            'message' => 'Verification failed: ' . $e->getMessage()
+        ], 500);
     }
+}
+
 
 
 

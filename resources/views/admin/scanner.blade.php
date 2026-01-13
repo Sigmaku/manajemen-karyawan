@@ -334,7 +334,11 @@ function verifyManualBarcode() {
 async function verifyBarcode(barcodeData) {
     showLoading('Verifying barcode...');
 
+
     try {
+        console.log('Scanned raw:', barcodeData);
+console.log('Parts:', String(barcodeData).split(':').length);
+
         const response = await fetch('{{ route("barcode.verify.checkin") }}', {
             method: 'POST',
             headers: {
@@ -346,6 +350,9 @@ async function verifyBarcode(barcodeData) {
         });
 
         const result = await response.json();
+        console.log('HTTP status:', response.status);
+        console.log('Result:', result);
+
 
         if (result.success) {
             handleSuccess(result.data);
