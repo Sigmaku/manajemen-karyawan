@@ -500,24 +500,27 @@ function parseBarcodeData(barcodeData) {
     if (!barcodeData) return '<tr><td colspan="3" class="text-center">No barcode data</td></tr>';
 
     const parts = barcodeData.split(':');
-    const descriptions = [
-        'Employee ID',
-        'Check-in Time',
-        'Date',
-        'Timestamp',
-        'Security Hash'
-    ];
+const descriptions = [
+  'Employee ID',
+  'Timestamp',
+  'Date',
+  'Check-in Time',
+  'Security Hash'
+];
+
 
     let html = '';
     parts.forEach((part, index) => {
         let value = part;
         let description = descriptions[index] || 'Additional Data';
 
-        // Format timestamp
-        if (index === 3 && !isNaN(part)) {
-            const date = new Date(parseInt(part) * 1000);
-            value = `${part} (${date.toLocaleString()})`;
-        }
+
+// Format timestamp (index 1)
+if (index === 1 && !isNaN(part)) {
+    const d = new Date(parseInt(part) * 1000);
+    value = `${part} (${d.toLocaleString()})`;
+}
+
 
         // Truncate long values
         if (value.length > 50) {

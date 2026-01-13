@@ -14,13 +14,11 @@
                 <div class="card-body">
                     <!-- Scanner Container -->
                     <div class="scanner-container mb-4">
-                        <div id="reader" class="border rounded" style="width: 100%; min-height: 400px; position: relative;">
-                            <!-- Scanner overlay will be added here -->
-                        </div>
+                        <div id="reader" class="border rounded" style="width: 100%; min-height: 400px; position: relative;"></div>
                         <div class="scanner-overlay text-center mt-2">
                             <div class="scan-guide">
                                 <i class="fas fa-qrcode fa-3x text-primary mb-3"></i>
-                                <p class="text-muted">Position the barcode within the frame</p>
+                                <p class="text-muted">Position the QR/Barcode within the frame</p>
                             </div>
                         </div>
                     </div>
@@ -61,6 +59,7 @@
                             </small>
                         </div>
                     </div>
+
                 </div>
             </div>
         </div>
@@ -137,6 +136,7 @@
                     </div>
                 </div>
             </div>
+
         </div>
     </div>
 </div>
@@ -167,6 +167,12 @@
                         <div class="col-6 text-end">
                             <small class="text-muted">Verified At:</small>
                             <div class="fw-bold" id="verified-time">--:--</div>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-12 text-center">
+                            <small class="text-muted">Status:</small>
+                            <div class="fw-bold" id="verified-status">--</div>
                         </div>
                     </div>
                 </div>
@@ -211,252 +217,128 @@
 
 @push('styles')
 <style>
-    .scanner-container {
-        position: relative;
-        overflow: hidden;
-    }
-
-    #reader {
-        background: #000;
-    }
-
-    .scanner-overlay {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        z-index: 100;
-    }
-
-    .scan-guide {
-        background: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-    }
-
-    .scan-line {
-        position: absolute;
-        width: 100%;
-        height: 3px;
-        background: #00ff00;
-        box-shadow: 0 0 10px #00ff00;
-        animation: scan 2s linear infinite;
-        top: 50%;
-    }
-
-    @keyframes scan {
-        0% { top: 0%; }
-        100% { top: 100%; }
-    }
-
-    .stat-box {
-        transition: transform 0.3s;
-    }
-
-    .stat-box:hover {
-        transform: translateY(-5px);
-    }
-
-    .verification-item {
-        padding: 10px 15px;
-        border-bottom: 1px solid #eee;
-        transition: background 0.2s;
-    }
-
-    .verification-item:hover {
-        background: #f8f9fa;
-    }
-
-    .verification-item.success {
-        border-left: 4px solid #28a745;
-    }
-
-    .verification-item.error {
-        border-left: 4px solid #dc3545;
-    }
-
-    .qr-box {
-        width: 200px;
-        height: 200px;
-        margin: 0 auto;
-        border: 2px solid #007bff;
-        border-radius: 10px;
-        padding: 10px;
-        background: white;
-    }
+    .scanner-container { position: relative; overflow: hidden; }
+    #reader { background: #000; }
+    .scanner-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 100; }
+    .scan-guide { background: rgba(0, 0, 0, 0.7); color: white; padding: 20px; border-radius: 10px; }
+    .scan-line { position: absolute; width: 100%; height: 3px; background: #00ff00; box-shadow: 0 0 10px #00ff00; animation: scan 2s linear infinite; top: 50%; }
+    @keyframes scan { 0% { top: 0%; } 100% { top: 100%; } }
+    .stat-box { transition: transform 0.3s; }
+    .stat-box:hover { transform: translateY(-5px); }
+    .verification-item { padding: 10px 15px; border-bottom: 1px solid #eee; transition: background 0.2s; }
+    .verification-item:hover { background: #f8f9fa; }
+    .verification-item.success { border-left: 4px solid #28a745; }
+    .verification-item.error { border-left: 4px solid #dc3545; }
 </style>
 @endpush
 
 @push('scripts')
 <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 <script>
-// Global variables
 let html5QrCode = null;
 let currentCameraId = null;
 let isScanning = false;
 let currentTorchState = false;
-let recentScans = [];
-let scanStats = {
-    today: 0,
-    verified: 0,
-    failed: 0
-};
 
-// Initialize scanner
+let recentScans = [];
+let scanStats = { today: 0, verified: 0, failed: 0 };
+
 document.addEventListener('DOMContentLoaded', function() {
     initScanner();
-    loadRecentScans();
     updateStatsDisplay();
-
-    // Check camera permissions
     checkCameraPermission();
-
-    // Auto-refresh recent scans every 10 seconds
-    setInterval(loadRecentScans, 10000);
 });
 
 function initScanner() {
     html5QrCode = new Html5Qrcode("reader");
-
-    // Get available cameras
     Html5Qrcode.getCameras().then(devices => {
-        if (devices && devices.length) {
-            currentCameraId = devices[0].id;
-            console.log(`Found ${devices.length} cameras. Using: ${devices[0].label}`);
-        } else {
-            showError('No cameras found', 'Please connect a camera to use the scanner.');
-        }
+        if (devices && devices.length) currentCameraId = devices[0].id;
+        else showErrorModal('No Camera', 'No cameras found. Please connect a camera.');
     }).catch(err => {
-        console.error("Camera error:", err);
-        showError('Camera Error', 'Unable to access camera. Please check permissions.');
+        console.error(err);
+        showErrorModal('Camera Error', 'Unable to access camera. Please check permissions.');
     });
 }
 
 function startScanner() {
-    if (!currentCameraId) {
-        alert('No camera available. Please connect a camera.');
-        return;
-    }
+    if (!currentCameraId) return alert('No camera available.');
 
-    const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0,
-        facingMode: { exact: "environment" }
-    };
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
 
-    html5QrCode.start(
-        currentCameraId,
-        config,
-        onScanSuccess,
-        onScanError
-    ).then(() => {
-        isScanning = true;
-        document.getElementById('start-scanner').disabled = true;
-        document.getElementById('stop-scanner').disabled = false;
-        document.querySelector('.scan-guide').style.display = 'none';
+    html5QrCode.start(currentCameraId, config, onScanSuccess, onScanError)
+        .then(() => {
+            isScanning = true;
+            document.getElementById('start-scanner').disabled = true;
+            document.getElementById('stop-scanner').disabled = false;
+            document.querySelector('.scan-guide').style.display = 'none';
 
-        // Add scan line animation
-        const readerDiv = document.getElementById('reader');
-        const scanLine = document.createElement('div');
-        scanLine.className = 'scan-line';
-        scanLine.id = 'scan-line';
-        readerDiv.appendChild(scanLine);
-
-        console.log('Scanner started successfully');
-    }).catch(err => {
-        console.error("Scanner start failed:", err);
-        showError('Scanner Error', 'Failed to start scanner: ' + err.message);
-    });
+            const scanLine = document.createElement('div');
+            scanLine.className = 'scan-line';
+            scanLine.id = 'scan-line';
+            document.getElementById('reader').appendChild(scanLine);
+        })
+        .catch(err => {
+            console.error(err);
+            showErrorModal('Scanner Error', 'Failed to start scanner: ' + err);
+        });
 }
 
 function stopScanner() {
     if (!isScanning) return;
-
     html5QrCode.stop().then(() => {
         isScanning = false;
         document.getElementById('start-scanner').disabled = false;
         document.getElementById('stop-scanner').disabled = true;
         document.querySelector('.scan-guide').style.display = 'block';
-
-        // Remove scan line
-        const scanLine = document.getElementById('scan-line');
-        if (scanLine) scanLine.remove();
-
-        console.log('Scanner stopped');
-    }).catch(err => {
-        console.error("Scanner stop failed:", err);
+        document.getElementById('scan-line')?.remove();
     });
 }
 
 function switchCamera() {
     Html5Qrcode.getCameras().then(devices => {
-        if (devices.length < 2) {
-            alert('Only one camera available');
-            return;
-        }
-
-        const currentIndex = devices.findIndex(d => d.id === currentCameraId);
-        const nextIndex = (currentIndex + 1) % devices.length;
-
-        console.log(`Switching camera from ${devices[currentIndex]?.label} to ${devices[nextIndex]?.label}`);
-
+        if (devices.length < 2) return alert('Only one camera available');
+        const idx = devices.findIndex(d => d.id === currentCameraId);
+        const next = (idx + 1) % devices.length;
         stopScanner();
-        currentCameraId = devices[nextIndex].id;
+        currentCameraId = devices[next].id;
         setTimeout(startScanner, 500);
     });
 }
 
 function toggleTorch() {
     if (!html5QrCode) return;
-
     try {
         currentTorchState = !currentTorchState;
-        html5QrCode.applyVideoConstraints({
-            advanced: [{torch: currentTorchState}]
-        });
-
-        const torchBtn = document.querySelector('[onclick="toggleTorch()"]');
-        torchBtn.innerHTML = currentTorchState ?
-            '<i class="fas fa-lightbulb me-2"></i>Torch On' :
-            '<i class="fas fa-lightbulb me-2"></i>Torch';
-        torchBtn.className = currentTorchState ?
-            'btn btn-warning active' : 'btn btn-warning';
-
-    } catch (err) {
-        console.error('Torch toggle error:', err);
+        html5QrCode.applyVideoConstraints({ advanced: [{ torch: currentTorchState }] });
+    } catch (e) {
+        console.warn('Torch not supported:', e);
     }
 }
 
 function onScanSuccess(decodedText) {
-    // Debounce: ignore if last scan was less than 2 seconds ago
-    if (window.lastScan && Date.now() - window.lastScan < 2000) {
-        console.log('Scan debounced');
-        return;
-    }
+    if (window.lastScan && Date.now() - window.lastScan < 2000) return;
     window.lastScan = Date.now();
-
-    console.log('Scanned:', decodedText.substring(0, 50) + '...');
-
-    // Pause scanner temporarily
     html5QrCode.pause();
-
-    // Verify the barcode
     verifyBarcode(decodedText);
 }
 
-function onScanError(error) {
-    // Mostly ignore, but log for debugging
-    if (!error.includes('NotFoundException')) {
-        console.error('Scan error:', error);
-    }
+function onScanError(error) { /* ignore */ }
+
+function verifyManualBarcode() {
+    const v = document.getElementById('manual-barcode').value.trim();
+    if (!v) return alert('Please enter a barcode');
+    verifyBarcode(v);
+    document.getElementById('manual-barcode').value = '';
 }
 
 async function verifyBarcode(barcodeData) {
     showLoading('Verifying barcode...');
 
+
     try {
+        console.log('Scanned raw:', barcodeData);
+console.log('Parts:', String(barcodeData).split(':').length);
+
         const response = await fetch('{{ route("barcode.verify.checkin") }}', {
             method: 'POST',
             headers: {
@@ -464,161 +346,97 @@ async function verifyBarcode(barcodeData) {
                 'X-CSRF-TOKEN': '{{ csrf_token() }}',
                 'Accept': 'application/json'
             },
-            body: JSON.stringify({
-                barcode_data: barcodeData,
-                scan_time: new Date().toISOString()
-            })
+            body: JSON.stringify({ barcode_data: barcodeData })
         });
 
         const result = await response.json();
+        console.log('HTTP status:', response.status);
+        console.log('Result:', result);
+
 
         if (result.success) {
-            handleVerificationSuccess(result.data, barcodeData);
+            handleSuccess(result.data);
         } else {
-            handleVerificationError(result.message, barcodeData, result.code);
+            handleError(result.message || 'Verification failed', result.code || '');
         }
-
-    } catch (error) {
-        console.error('Verification error:', error);
-        handleVerificationError('Network error. Please try again.', barcodeData, 'NETWORK_ERROR');
+    } catch (e) {
+        console.error(e);
+        handleError('Network error. Please try again.', 'NETWORK_ERROR');
     }
 }
 
-function handleVerificationSuccess(data, barcodeData) {
-    // Update stats
+function handleSuccess(data) {
     scanStats.today++;
     scanStats.verified++;
 
-    // Add to recent scans
+    // recent list
     addToRecentScans({
-        id: 'scan_' + Date.now(),
-        employee_id: data.employee.id,
-        employee_name: data.employee.name,
-        time: new Date().toLocaleTimeString(),
+        employee_id: data.employee_id,
+        employee_name: data.employee_name,
         status: 'success',
-        message: 'Verified successfully',
-        checkin_time: data.attendance.checkIn,
-        verified_by: data.verification.scanned_by
+        time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
+        message: `Verified (${(data.status || '').toUpperCase()})`
     });
 
-    // Update display
     updateVerificationResult(data);
     updateStatsDisplay();
-
-    // Play success sound if available
     playSuccessSound();
-
-    // Show success modal
     showSuccessModal(data);
 
-    // Resume scanning after 3 seconds
-    setTimeout(() => {
-        if (isScanning) {
-            html5QrCode.resume();
-        }
-    }, 3000);
+    setTimeout(() => { if (isScanning) html5QrCode.resume(); }, 2000);
 }
 
-function handleVerificationError(message, barcodeData, errorCode) {
-    // Update stats
+function handleError(message, code) {
     scanStats.today++;
     scanStats.failed++;
 
-    // Add to recent scans
     addToRecentScans({
-        id: 'scan_' + Date.now(),
-        employee_id: barcodeData.split(':')[0] || 'unknown',
+        employee_id: '-',
         employee_name: 'Invalid Barcode',
-        time: new Date().toLocaleTimeString(),
         status: 'error',
-        message: message,
-        error_code: errorCode
+        time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
+        message: code ? `${message} (${code})` : message
     });
 
-    // Update display
-    showErrorResult(message, errorCode);
+    showErrorResult(message, code);
     updateStatsDisplay();
+    showErrorModal(code === 'BARCODE_EXPIRED' ? 'Barcode Expired' : 'Verification Failed', message);
 
-    // Show error modal
-    showErrorModal(message, errorCode);
-
-    // Resume scanning after 2 seconds
-    setTimeout(() => {
-        if (isScanning) {
-            html5QrCode.resume();
-        }
-    }, 2000);
-}
-
-function verifyManualBarcode() {
-    const barcodeInput = document.getElementById('manual-barcode');
-    const barcode = barcodeInput.value.trim();
-
-    if (!barcode) {
-        alert('Please enter a barcode');
-        return;
-    }
-
-    if (barcode.length < 10) {
-        alert('Invalid barcode format');
-        return;
-    }
-
-    verifyBarcode(barcode);
-    barcodeInput.value = '';
+    setTimeout(() => { if (isScanning) html5QrCode.resume(); }, 1500);
 }
 
 function addToRecentScans(scan) {
     recentScans.unshift(scan);
-
-    // Keep only last 20 scans
-    if (recentScans.length > 20) {
-        recentScans.pop();
-    }
-
+    if (recentScans.length > 20) recentScans.pop();
     updateRecentScansDisplay();
 }
 
 function updateRecentScansDisplay() {
     const container = document.getElementById('recent-scans-list');
-    const countElement = document.getElementById('recent-count');
-
-    countElement.textContent = recentScans.length;
+    document.getElementById('recent-count').textContent = recentScans.length;
 
     if (recentScans.length === 0) {
-        container.innerHTML = `
-            <div class="text-center py-4">
-                <i class="fas fa-clock fa-2x text-muted mb-3"></i>
-                <p class="text-muted">No scans yet</p>
-            </div>
-        `;
+        container.innerHTML = `<div class="text-center py-4"><p class="text-muted">No scans yet</p></div>`;
         return;
     }
 
-    let html = '';
-    recentScans.forEach(scan => {
-        const statusClass = scan.status === 'success' ? 'success' : 'error';
-        const statusIcon = scan.status === 'success' ?
-            '<i class="fas fa-check-circle text-success me-2"></i>' :
-            '<i class="fas fa-times-circle text-danger me-2"></i>';
-
-        html += `
-            <div class="verification-item ${statusClass}">
+    container.innerHTML = recentScans.map(scan => {
+        const ok = scan.status === 'success';
+        return `
+            <div class="verification-item ${ok ? 'success' : 'error'}">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="fw-bold">${scan.employee_name}</div>
                         <small class="text-muted">${scan.employee_id} • ${scan.time}</small>
-                        ${scan.message ? `<div class="small mt-1">${scan.message}</div>` : ''}
+                        <div class="small mt-1">${scan.message}</div>
                     </div>
                     <div>
-                        ${statusIcon}
+                        ${ok ? '<i class="fas fa-check-circle text-success"></i>' : '<i class="fas fa-times-circle text-danger"></i>'}
                     </div>
                 </div>
             </div>
         `;
-    });
-
-    container.innerHTML = html;
+    }).join('');
 }
 
 function updateStatsDisplay() {
@@ -626,197 +444,104 @@ function updateStatsDisplay() {
     document.getElementById('verified-count').textContent = scanStats.verified;
     document.getElementById('failed-count').textContent = scanStats.failed;
 
-    const successRate = scanStats.today > 0 ?
-        Math.round((scanStats.verified / scanStats.today) * 100) : 0;
-    document.getElementById('success-rate').textContent = successRate + '%';
+    const rate = scanStats.today > 0 ? Math.round((scanStats.verified / scanStats.today) * 100) : 0;
+    document.getElementById('success-rate').textContent = rate + '%';
 }
 
 function updateVerificationResult(data) {
-    const container = document.getElementById('verification-result');
-
-    container.innerHTML = `
-        <div class="alert alert-success">
-            <div class="d-flex align-items-center">
-                <i class="fas fa-check-circle fa-2x me-3"></i>
-                <div>
-                    <h5 class="mb-1">Verified Successfully!</h5>
-                    <p class="mb-0">${data.employee.name} has been verified.</p>
-                </div>
-            </div>
-
+    document.getElementById('verification-result').innerHTML = `
+        <div class="alert alert-success text-start">
+            <h5 class="mb-2"><i class="fas fa-check-circle me-2"></i>Verified</h5>
+            <div><strong>${data.employee_name}</strong> (${data.employee_id})</div>
+            <div class="small text-muted">Dept: ${data.department || '-'}</div>
             <hr>
-
-            <div class="row mt-3">
-                <div class="col-6">
-                    <small class="text-muted">Employee ID</small>
-                    <div class="fw-bold">${data.employee.id}</div>
-                </div>
-                <div class="col-6">
-                    <small class="text-muted">Department</small>
-                    <div class="fw-bold">${data.employee.department}</div>
-                </div>
-            </div>
-
-            <div class="row mt-2">
-                <div class="col-6">
-                    <small class="text-muted">Check-in Time</small>
-                    <div class="fw-bold">${data.attendance.checkIn}</div>
-                </div>
-                <div class="col-6">
-                    <small class="text-muted">Verified At</small>
-                    <div class="fw-bold">${data.verification.time}</div>
-                </div>
-            </div>
-
-            <div class="mt-3">
-                <small class="text-muted">Location</small>
-                <div class="fw-bold">${data.attendance.location || 'Office'}</div>
-            </div>
+            <div class="small">Check-in: <strong>${data.check_in_time}</strong></div>
+            <div class="small">Verified at: <strong>${data.verification_time}</strong></div>
+            <div class="small">Location: <strong>${data.location || 'Office'}</strong></div>
+            <div class="small">Status: <strong>${(data.status || '').toUpperCase()}</strong></div>
         </div>
     `;
 }
 
-function showErrorResult(message, errorCode) {
-    const container = document.getElementById('verification-result');
-
-    container.innerHTML = `
-        <div class="alert alert-danger">
-            <div class="d-flex align-items-center">
-                <i class="fas fa-times-circle fa-2x me-3"></i>
-                <div>
-                    <h5 class="mb-1">Verification Failed</h5>
-                    <p class="mb-0">${message}</p>
-                    ${errorCode ? `<small class="text-muted">Error Code: ${errorCode}</small>` : ''}
-                </div>
-            </div>
+function showErrorResult(message, code) {
+    document.getElementById('verification-result').innerHTML = `
+        <div class="alert alert-danger text-start">
+            <h5 class="mb-2"><i class="fas fa-times-circle me-2"></i>Failed</h5>
+            <div>${message}</div>
+            ${code ? `<div class="small text-muted">Code: ${code}</div>` : ''}
         </div>
     `;
 }
 
-function showLoading(message) {
-    const container = document.getElementById('verification-result');
-
-    container.innerHTML = `
+function showLoading(msg) {
+    document.getElementById('verification-result').innerHTML = `
         <div class="text-center py-4">
-            <div class="spinner-border text-primary mb-3" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p class="text-muted">${message}</p>
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <p class="text-muted">${msg}</p>
         </div>
     `;
 }
 
 function showSuccessModal(data) {
-    document.getElementById('employee-name').textContent = data.employee.name;
-    document.getElementById('employee-details').textContent =
-        `${data.employee.position} • ${data.employee.department}`;
-    document.getElementById('checkin-time').textContent = data.attendance.checkIn;
-    document.getElementById('verified-time').textContent = data.verification.time;
+    document.getElementById('employee-name').textContent = data.employee_name;
+    document.getElementById('employee-details').textContent = `${data.position || '-'} • ${data.department || '-'}`;
+    document.getElementById('checkin-time').textContent = data.check_in_time;
+    document.getElementById('verified-time').textContent = (data.verification_time || '').split(' ')[1] || data.verification_time;
+    document.getElementById('verified-status').textContent = (data.status || '').toUpperCase();
 
-    const modal = new bootstrap.Modal(document.getElementById('successModal'));
-    modal.show();
-}
-
-function showErrorModal(message, errorCode) {
-    document.getElementById('error-title').textContent =
-        errorCode === 'BARCODE_EXPIRED' ? 'Barcode Expired' : 'Verification Failed';
-    document.getElementById('error-message').textContent = message;
-
-    const modal = new bootstrap.Modal(document.getElementById('errorModal'));
-    modal.show();
+    new bootstrap.Modal(document.getElementById('successModal')).show();
 }
 
 function continueScanning() {
-    if (isScanning) {
-        html5QrCode.resume();
-    }
+    if (isScanning) html5QrCode.resume();
 }
 
 function playSuccessSound() {
-    try {
-        const audio = document.getElementById('success-sound');
-        if (audio) {
-            audio.currentTime = 0;
-            audio.play().catch(e => console.log('Audio play failed:', e));
-        }
-    } catch (e) {
-        console.log('Sound error:', e);
-    }
+    const audio = document.getElementById('success-sound');
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
 }
 
 function checkCameraPermission() {
     navigator.mediaDevices.getUserMedia({ video: true })
-        .then(stream => {
-            console.log('Camera permission granted');
-            stream.getTracks().forEach(track => track.stop());
-        })
-        .catch(err => {
-            console.warn('Camera permission denied or error:', err);
-            showError('Camera Access Required',
-                'Please allow camera access to use the scanner. ' +
-                'Check your browser settings and refresh the page.');
-        });
+        .then(stream => stream.getTracks().forEach(t => t.stop()))
+        .catch(() => {});
 }
 
-async function loadRecentScans() {
-    try {
-        const response = await fetch('{{ route("barcode.verification.history") }}');
-        const result = await response.json();
-
-        if (result.success && result.data) {
-            // Update recent scans with server data
-            recentScans = result.data.map(item => ({
-                id: item.id,
-                employee_id: item.employee_id,
-                employee_name: item.employee_name,
-                time: new Date(item.verification_time).toLocaleTimeString(),
-                status: item.status,
-                message: 'Verified by ' + item.verified_by
-            }));
-
-            updateRecentScansDisplay();
-        }
-    } catch (error) {
-        console.error('Load recent scans error:', error);
-    }
-}
-
-// Handle visibility change
-document.addEventListener('visibilitychange', function() {
-    if (document.hidden && isScanning) {
-        // Page is hidden, stop scanner to save resources
-        stopScanner();
-    }
+document.addEventListener('keydown', function(e) {
+    if (e.code === 'Space') { e.preventDefault(); isScanning ? stopScanner() : startScanner(); }
+    if (e.code === 'Escape' && isScanning) stopScanner();
+    if (e.code === 'Enter' && document.activeElement.id === 'manual-barcode') verifyManualBarcode();
 });
 
-// Handle before unload
 window.addEventListener('beforeunload', function() {
-    if (isScanning) {
-        stopScanner();
-    }
+    if (isScanning) stopScanner();
 });
+function showErrorModal(title, message) {
+    const t = document.getElementById('error-title');
+    const m = document.getElementById('error-message');
+    if (t) t.textContent = title || 'Verification Failed';
+    if (m) m.textContent = message || 'Unknown error';
 
-// Keyboard shortcuts
-document.addEventListener('keydown', function(event) {
-    // Space to toggle scanner
-    if (event.code === 'Space') {
-        event.preventDefault();
-        if (isScanning) {
-            stopScanner();
-        } else {
-            startScanner();
-        }
-    }
+    const modalEl = document.getElementById('errorModal');
+    if (modalEl) new bootstrap.Modal(modalEl).show();
+}
 
-    // Escape to stop scanner
-    if (event.code === 'Escape' && isScanning) {
-        stopScanner();
-    }
+function showSuccessModal(data) {
+    document.getElementById('employee-name').textContent = data.employee_name || '-';
+    document.getElementById('employee-details').textContent =
+        `${data.position || '-'} • ${data.department || '-'}`;
 
-    // Enter on manual input
-    if (event.code === 'Enter' && document.activeElement.id === 'manual-barcode') {
-        verifyManualBarcode();
-    }
-});
+    document.getElementById('checkin-time').textContent = data.check_in_time || '--:--';
+    document.getElementById('verified-time').textContent =
+        (data.verification_time || '').split(' ')[1] || (data.verification_time || '--:--');
+    const st = document.getElementById('verified-status');
+    if (st) st.textContent = (data.status || '').toUpperCase();
+
+    const modalEl = document.getElementById('successModal');
+    if (modalEl) new bootstrap.Modal(modalEl).show();
+}
+
 </script>
 @endpush

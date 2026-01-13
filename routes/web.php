@@ -112,7 +112,7 @@ Route::middleware(['auth.check'])->group(function () {
         });
 
         // General barcode info page
-        Route::get('/info', function() {
+        Route::get('/info', function () {
             $user = session('user');
             return view('attendance.barcode-info', ['role' => $user['role'] ?? 'employee']);
         })->name('info');
@@ -127,12 +127,12 @@ Route::middleware(['auth.check'])->group(function () {
 
         // Employee: lihat cuti sendiri
         Route::middleware(['role:employee'])->get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('my');
-          // Route API untuk AJAX/Realtime
-          Route::middleware(['role:employee'])
+        // Route API untuk AJAX/Realtime
+        Route::middleware(['role:employee'])
             ->get('/api/my', [LeaveController::class, 'apiMyLeaves'])
             ->name('api.my');
 
-          Route::middleware(['role:admin,manager'])
+        Route::middleware(['role:admin,manager'])
             ->get('/api/all', [LeaveController::class, 'apiAllLeaves'])
             ->name('api.all');
 

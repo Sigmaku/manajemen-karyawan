@@ -76,7 +76,7 @@ class AttendanceController extends Controller
             }
 
             // Sort by check-in time (latest first)
-            usort($attendanceList, function($a, $b) {
+            usort($attendanceList, function ($a, $b) {
                 $timeA = $a['attendance']['checkIn'] ?? '00:00';
                 $timeB = $b['attendance']['checkIn'] ?? '00:00';
                 return strcmp($timeB, $timeA);
@@ -94,7 +94,6 @@ class AttendanceController extends Controller
                 'todayAttendance' => $todayAttendanceData ?? null,
                 'employeeAttendance' => $employeeAttendance ?? []
             ]);
-
         } catch (\Exception $e) {
             return view('attendance.dashboard', [
                 'attendanceList' => [],
@@ -116,7 +115,6 @@ class AttendanceController extends Controller
         $role = $user['role'] ?? 'employee';
         $employeeId = $user['employee_id'] ?? null;
 
-        // Only employees can check in/out
         if ($role !== 'employee') {
             return redirect()->route('attendance.dashboard')
                 ->with('error', 'Only employees can check in/out');
@@ -126,13 +124,12 @@ class AttendanceController extends Controller
             return back()->with('error', 'Employee ID not found in session');
         }
 
-        // Auto use logged in employee ID
         $request->merge(['employee_id' => $employeeId]);
 
         $validator = Validator::make($request->all(), [
             'employee_id' => 'required|string',
-            'location'    => 'required|string',
-            'notes'       => 'nullable|string'
+            'location' => 'required|string',
+            'notes' => 'nullable|string'
         ]);
 
         if ($validator->fails()) {
@@ -140,55 +137,41 @@ class AttendanceController extends Controller
         }
 
         try {
-            $employee = $this->firebase->getEmployee($employeeId);
-            if (!$employee) {
-                return back()->with('error', 'Employee not found');
-            }
+            $today = date('Y-m-d');
 
-            // Check if already checked in today
+            // sudah check-in hari ini?
             $todayAttendance = $this->firebase->getTodayAttendance();
             if (isset($todayAttendance[$employeeId])) {
                 return back()->with('error', 'Already checked in today');
             }
 
-            // =========================
-            // Time Rules
-            // =========================
-            $today = date('Y-m-d');
-            $checkInTimeStr = now()->format('H:i');
+            $checkInTime = now()->format('H:i');
 
-            $officeStart   = \Carbon\Carbon::parse($today . ' 08:00');
-            $checkInCarbon = \Carbon\Carbon::parse($today . ' ' . $checkInTimeStr);
-
-            $isLate = $checkInCarbon->gt($officeStart);
-            $lateMinutes = $isLate ? $officeStart->diffInMinutes($checkInCarbon) : 0;
-
+            // ✅ simpan attendance sebagai PENDING
             $attendanceData = [
-                'checkIn'     => $checkInTimeStr,
-                'location'    => $request->location ?? 'Office',
-                'notes'       => $request->notes ?? '',
-                'isLate'      => $isLate,
-                'lateMinutes' => $lateMinutes,                 // ✅ for dashboard display
-                'status'      => $isLate ? 'late' : 'present', // ✅ for badge
-                'checkedInAt' => now()->toISOString(),         // optional audit field
+                'checkIn' => $checkInTime,
+                'checkOut' => null,
+                'hoursWorked' => 0,
+                'location' => $request->location ?? 'Office',
+                'notes' => $request->notes ?? '',
+                'overtime' => 0,
+                'status' => 'pending',                // ✅ pending sampai admin scan
+                'timestamp' => now()->toISOString(),
+                'updatedAt' => now()->toISOString(),
             ];
 
-            $record = $this->firebase->recordCheckIn($employeeId, $attendanceData);
+            $this->firebase->getDatabase()
+                ->getReference("attendances/{$this->firebase->getCompanyId()}/{$today}/{$employeeId}")
+                ->set($attendanceData);
 
             return redirect()->route('attendance.dashboard')
-                ->with('success', 'Check-in recorded successfully!')
-                ->with('checkin_data', [
-                    'employee_id'   => $employeeId,
-                    'employee_name' => $employee['name'] ?? 'Unknown',
-                    'check_in'      => $record['checkIn'] ?? $checkInTimeStr,
-                    'location'      => $record['location'] ?? ($request->location ?? 'Office'),
-                    'late'          => $record['isLate'] ?? $isLate,
-                    'late_minutes'  => $record['lateMinutes'] ?? $lateMinutes,
-                ]);
+                ->with('success', 'Check-in pending. Please generate barcode and show it to admin for verification.');
         } catch (\Exception $e) {
             return back()->with('error', 'Check-in failed: ' . $e->getMessage());
         }
     }
+
+
 
 
     public function checkOut(Request $request)
@@ -269,6 +252,84 @@ class AttendanceController extends Controller
                 'hours_worked'  => $hoursWorked,
                 'overtime'      => $overtime,
                 'late_minutes'  => $lateMinutes
+            ]
+        ]);
+    }
+
+    public function verifyCheckIn(Request $request)
+    {
+        $user = session('user');
+        $role = $user['role'] ?? 'employee';
+
+        if (!in_array($role, ['admin', 'manager'])) {
+            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
+        }
+
+        $request->validate([
+            'employee_id' => 'required|string',
+            'date' => 'required|date_format:Y-m-d',
+            'token' => 'required|string',
+        ]);
+
+        $employeeId = $request->employee_id;
+        $date = $request->date;
+        $token = strtoupper(trim($request->token));
+
+        $companyId = $this->firebase->getCompanyId();
+
+        // ambil liveStatus untuk cek token
+        $live = $this->firebase->getDatabase()
+            ->getReference("liveStatus/{$companyId}/{$employeeId}")
+            ->getValue();
+
+        if (!$live || ($live['status'] ?? '') !== 'pending') {
+            return response()->json(['success' => false, 'message' => 'No pending verification found'], 400);
+        }
+
+        if (($live['date'] ?? '') !== $date) {
+            return response()->json(['success' => false, 'message' => 'Invalid date'], 400);
+        }
+
+        if (($live['token'] ?? '') !== $token) {
+            return response()->json(['success' => false, 'message' => 'Invalid token'], 400);
+        }
+
+        // ambil attendance
+        $ref = $this->firebase->getDatabase()
+            ->getReference("attendances/{$companyId}/{$date}/{$employeeId}");
+
+        $att = $ref->getValue();
+        if (!$att || empty($att['checkIn'])) {
+            return response()->json(['success' => false, 'message' => 'Attendance check-in not found'], 404);
+        }
+
+        // tentukan late/present dari jam check-in
+        $checkInTime = \Carbon\Carbon::parse($date . ' ' . $att['checkIn']);
+        $officeStart = \Carbon\Carbon::parse($date . ' 08:00');
+
+        $finalStatus = $checkInTime->gt($officeStart) ? 'late' : 'present';
+
+        // ✅ update attendance: hanya ubah field yang sudah ada (status, updatedAt)
+        $ref->update([
+            'status' => $finalStatus,
+            'updatedAt' => now()->toISOString(),
+        ]);
+
+        // ✅ update liveStatus
+        $this->firebase->getDatabase()
+            ->getReference("liveStatus/{$companyId}/{$employeeId}")
+            ->set([
+                'status' => 'checked_in',
+                'lastUpdate' => now()->format('Y-m-d H:i:s'),
+            ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Check-in verified',
+            'data' => [
+                'employee_id' => $employeeId,
+                'date' => $date,
+                'status' => $finalStatus,
             ]
         ]);
     }
@@ -484,7 +545,6 @@ class AttendanceController extends Controller
         $role = $user['role'] ?? 'employee';
         $employeeId = $user['employee_id'] ?? null;
 
-        // Only employees can generate barcode
         if ($role !== 'employee') {
             return response()->json([
                 'success' => false,
@@ -493,7 +553,9 @@ class AttendanceController extends Controller
         }
 
         try {
-            // Cek langsung di method ini (tanpa API call)
+            $today = date('Y-m-d');
+
+            // Ambil attendance hari ini
             $todayAttendance = $this->firebase->getTodayAttendance();
 
             if (!isset($todayAttendance[$employeeId])) {
@@ -504,7 +566,17 @@ class AttendanceController extends Controller
                 ], 400);
             }
 
-            // Get employee data
+            $attendance = $todayAttendance[$employeeId];
+
+            // ✅ hanya boleh generate kalau status masih pending
+            if (($attendance['status'] ?? '') !== 'pending') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Your check-in is already verified (or not pending).',
+                    'code' => 'NOT_PENDING'
+                ], 400);
+            }
+
             $employee = $this->firebase->getEmployee($employeeId);
             if (!$employee) {
                 return response()->json([
@@ -514,13 +586,15 @@ class AttendanceController extends Controller
             }
 
             $timestamp = time();
-            $checkInData = $todayAttendance[$employeeId];
-            $checkInTime = $checkInData['checkIn'] ?? date('H:i');
+            $checkInTime = $attendance['checkIn'] ?? now()->format('H:i');
 
-            // Simple format: employee_id:timestamp
-            $dataString = $employeeId . ':' . $timestamp;
+            // ✅ 5 parts data string (tanpa secret)
+            $dataString = $employeeId . ':' . $timestamp . ':' . $today . ':' . $checkInTime;
+
+            // secret (MD5)
             $secret = md5($dataString . env('BARCODE_SECRET', 'attendance_secret_2024'));
 
+            // final barcode
             $barcodeData = $dataString . ':' . $secret;
 
             return response()->json([
@@ -529,18 +603,16 @@ class AttendanceController extends Controller
                 'data' => [
                     'barcode' => $barcodeData,
                     'employee_id' => $employeeId,
-                    'employee_name' => $employee['name'],
+                    'employee_name' => $employee['name'] ?? 'Employee',
                     'check_in_time' => $checkInTime,
-                    'date' => date('Y-m-d'),
+                    'date' => $today,
                     'timestamp' => $timestamp,
                     'valid_until' => date('Y-m-d H:i:s', $timestamp + 300),
                     'expires_in' => 300
                 ]
             ]);
-
         } catch (\Exception $e) {
             Log::error('Generate barcode error: ' . $e->getMessage());
-
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to generate barcode: ' . $e->getMessage()
@@ -548,134 +620,189 @@ class AttendanceController extends Controller
         }
     }
 
+
+
     /**
      * Verify check-in barcode (for admin scanning)
      */
     public function verifyCheckInBarcode(Request $request)
-    {
-        $user = session('user');
-        $role = $user['role'] ?? 'employee';
+{
+    $user = session('user');
+    $role = $user['role'] ?? 'employee';
 
-        // Only admin/manager can verify barcodes
-        if (!in_array($role, ['admin', 'manager'])) {
+    if (!in_array($role, ['admin', 'manager'])) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Only administrators can verify barcodes'
+        ], 403);
+    }
+
+    $validator = Validator::make($request->all(), [
+        'barcode_data' => 'required|string'
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Invalid barcode data'
+        ], 422);
+    }
+
+    try {
+        // 1) Normalisasi input (hapus whitespace termasuk newline)
+        $barcodeData = trim((string) $request->barcode_data);
+        $barcodeData = preg_replace('/\s+/', '', $barcodeData);
+
+        // 2) Validasi minimal: harus punya ":" dan secret md5 32 char di akhir
+        // Format yang kita dukung:
+        // emp_1571:1768261370:2026-01-13:06:27:e7a927bb01d0199d508d40fd795e9d25
+        // (note: jam mengandung ":" jadi total part bisa 6)
+        if (strlen($barcodeData) < 40) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only administrators can verify barcodes'
-            ], 403);
+                'message' => 'Invalid barcode format'
+            ], 400);
         }
 
-        $validator = Validator::make($request->all(), [
-            'barcode_data' => 'required|string'
+        // 3) Ambil secret = 32 char terakhir (md5)
+        $secret = substr($barcodeData, -32);
+
+        // Pastikan secret beneran hex 32 char
+        if (!preg_match('/^[a-f0-9]{32}$/i', $secret)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (secret)'
+            ], 400);
+        }
+
+        // 4) Payload = semua sebelum ":<secret>"
+        // (hapus 32 char secret + 1 char ":" sebelumnya)
+        $payload = substr($barcodeData, 0, -33);
+
+        // 5) Payload harus jadi 4 bagian: employeeId:timestamp:date:checkInTime
+        // Pakai limit 4 supaya jam "06:27" tetap utuh.
+        $parts = explode(':', $payload, 4);
+
+        if (count($parts) !== 4) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format'
+            ], 400);
+        }
+
+        [$employeeId, $timestamp, $date, $checkInTimeFromBarcode] = $parts;
+
+        // 6) Validasi basic field
+        $employeeId = trim($employeeId);
+        $timestamp = trim($timestamp);
+        $date = trim($date);
+        $checkInTimeFromBarcode = trim($checkInTimeFromBarcode);
+
+        if ($employeeId === '' || !ctype_digit($timestamp)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (employee/timestamp)'
+            ], 400);
+        }
+
+        // date format Y-m-d
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (date)'
+            ], 400);
+        }
+
+        // time format H:i (atau H:i:s kalau kamu mau support)
+        if (!preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $checkInTimeFromBarcode)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode format (time)'
+            ], 400);
+        }
+
+        // 7) Expired check (5 menit)
+        if ((time() - (int) $timestamp) > 300) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Barcode expired. Please generate a new one.',
+                'code' => 'BARCODE_EXPIRED'
+            ], 400);
+        }
+
+        // 8) Verify secret
+        $dataString = $employeeId . ':' . $timestamp . ':' . $date . ':' . $checkInTimeFromBarcode;
+        $expectedSecret = md5($dataString . env('BARCODE_SECRET', 'attendance_secret_2024'));
+
+        if (!hash_equals($expectedSecret, $secret)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid barcode security code'
+            ], 400);
+        }
+
+        // 9) Ambil attendance record
+        $attendanceRef = $this->firebase->getDatabase()
+            ->getReference("attendances/{$this->firebase->getCompanyId()}/{$date}/{$employeeId}");
+
+        $attendance = $attendanceRef->getValue();
+
+        if (!$attendance || empty($attendance['checkIn'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No check-in record found for this date',
+                'code' => 'NO_CHECKIN_RECORD'
+            ], 400);
+        }
+
+        // 10) Harus pending
+        if (($attendance['status'] ?? '') !== 'pending') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Attendance is not pending (already verified or invalid).',
+                'code' => 'NOT_PENDING'
+            ], 400);
+        }
+
+        // 11) Tentukan present/late dari jam checkIn tersimpan di Firebase
+        $ci = \Carbon\Carbon::parse($date . ' ' . ($attendance['checkIn'] ?? $checkInTimeFromBarcode));
+        $officeStart = \Carbon\Carbon::parse($date . ' 08:00');
+        $finalStatus = $ci->gt($officeStart) ? 'late' : 'present';
+
+        // 12) Update attendance status final
+        $attendanceRef->update([
+            'status' => $finalStatus,
+            'updatedAt' => now()->toISOString(),
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid barcode data'
-            ], 422);
-        }
+        // 13) Log verification (optional)
+        $this->storeBarcodeVerification($employeeId, $barcodeData, $user['name'] ?? 'Admin');
 
-        try {
-            $barcodeData = $request->barcode_data;
-            $parts = explode(':', $barcodeData);
+        return response()->json([
+            'success' => true,
+            'message' => 'Check-in verified successfully',
+            'data' => [
+                'employee_id' => $employeeId,
+                'date' => $date,
+                'check_in_time' => $attendance['checkIn'],
+                'status' => $finalStatus,
+                'verified_by' => $user['name'] ?? 'Admin',
+                'verification_time' => now()->format('Y-m-d H:i:s'),
+                'attendance_data' => $attendance
+            ]
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Verify barcode error: ' . $e->getMessage());
 
-            if (count($parts) < 5) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid barcode format'
-                ], 400);
-            }
-
-            $employeeId = $parts[0];
-            $checkInTime = $parts[1];
-            $date = $parts[2];
-            $timestamp = $parts[3];
-            $secret = $parts[4];
-
-            // Verify barcode is not expired (valid for 5 minutes)
-            $currentTime = time();
-            if (($currentTime - intval($timestamp)) > 300) { // 5 minutes
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Barcode expired. Please generate a new one.',
-                    'code' => 'BARCODE_EXPIRED'
-                ], 400);
-            }
-
-            // Verify secret hash
-            $dataString = $employeeId . ':' . $checkInTime . ':' . $date . ':' . $timestamp;
-            $expectedSecret = md5($dataString . env('BARCODE_SECRET', 'attendance_secret_2024'));
-
-            if ($secret !== $expectedSecret) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid barcode security code'
-                ], 400);
-            }
-
-            // Check if employee exists
-            $employee = $this->firebase->getEmployee($employeeId);
-            if (!$employee) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Employee not found'
-                ], 404);
-            }
-
-            // Check if employee actually checked in on that date
-            $attendance = $this->firebase->getDatabase()
-                ->getReference("attendances/{$this->firebase->getCompanyId()}/{$date}/{$employeeId}")
-                ->getValue();
-
-            if (!$attendance || !isset($attendance['checkIn'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No check-in record found for this date',
-                    'code' => 'NO_CHECKIN_RECORD'
-                ], 400);
-            }
-
-            // Verify check-in time matches (within 5 minute tolerance)
-            $recordedTime = $attendance['checkIn'];
-            if (abs(strtotime($recordedTime) - strtotime($checkInTime)) > 300) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Check-in time does not match records',
-                    'code' => 'TIME_MISMATCH'
-                ]);
-            }
-
-            // Mark barcode as verified
-            $this->storeBarcodeVerification($employeeId, $barcodeData, 'verified_by_' . $user['name']);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Check-in verified successfully',
-                'data' => [
-                    'employee_id' => $employeeId,
-                    'employee_name' => $employee['name'],
-                    'department' => $employee['department'] ?? 'Unknown',
-                    'position' => $employee['position'] ?? 'Staff',
-                    'check_in_time' => $attendance['checkIn'],
-                    'check_out_time' => $attendance['checkOut'] ?? null,
-                    'location' => $attendance['location'] ?? 'Unknown',
-                    'date' => $date,
-                    'verification_time' => date('Y-m-d H:i:s'),
-                    'verified_by' => $user['name'] ?? 'Admin',
-                    'status' => 'verified',
-                    'attendance_data' => $attendance
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Verify barcode error: ' . $e->getMessage());
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Verification failed: ' . $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'success' => false,
+            'message' => 'Verification failed: ' . $e->getMessage()
+        ], 500);
     }
+}
+
+
+
 
     /**
      * Store barcode in database
@@ -762,7 +889,6 @@ class AttendanceController extends Controller
                 'employees' => $employees,
                 'total' => count($verifications)
             ]);
-
         } catch (\Exception $e) {
             return view('attendance.barcode-verification-history', [
                 'verifications' => [],
@@ -809,7 +935,6 @@ class AttendanceController extends Controller
                 'employeeId' => $employeeId,
                 'currentEmployeeId' => $employeeId
             ]);
-
         } catch (\Exception $e) {
             Log::error('Show employee barcode error: ' . $e->getMessage());
 
@@ -840,140 +965,139 @@ class AttendanceController extends Controller
     /**
      * Verify barcode scan from admin
      */
-    public function verifyBarcodeScan(Request $request)
-    {
-        $user = session('user');
-        $role = $user['role'] ?? 'employee';
+    // public function verifyBarcodeScan(Request $request)
+    // {
+    //     $user = session('user');
+    //     $role = $user['role'] ?? 'employee';
 
-        // Only admin/manager can verify scans
-        if (!in_array($role, ['admin', 'manager'])) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized access'
-            ], 403);
-        }
+    //     // Only admin/manager can verify scans
+    //     if (!in_array($role, ['admin', 'manager'])) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Unauthorized access'
+    //         ], 403);
+    //     }
 
-        $validator = Validator::make($request->all(), [
-            'barcode_data' => 'required|string|min:10'
-        ]);
+    //     $validator = Validator::make($request->all(), [
+    //         'barcode_data' => 'required|string|min:10'
+    //     ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid barcode data'
-            ], 422);
-        }
+    //     if ($validator->fails()) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Invalid barcode data'
+    //         ], 422);
+    //     }
 
-        try {
-            $barcodeData = $request->barcode_data;
+    //     try {
+    //         $barcodeData = $request->barcode_data;
 
-            // Parse barcode data format: employee_id:timestamp:date:checkin_time:secret
-            $parts = explode(':', $barcodeData);
+    //         // Parse barcode data format: employee_id:timestamp:date:checkin_time:secret
+    //         $parts = explode(':', $barcodeData);
 
-            if (count($parts) < 5) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid barcode format'
-                ], 400);
-            }
+    //         if (count($parts) < 5) {
+    //             return response()->json([
+    //                 'success' => false,
+    //                 'message' => 'Invalid barcode format'
+    //             ], 400);
+    //         }
 
-            $employeeId = $parts[0];
-            $timestamp = $parts[1];
-            $date = $parts[2];
-            $checkInTime = $parts[3];
-            $secret = $parts[4];
+    //         $employeeId = $parts[0];
+    //         $timestamp = $parts[1];
+    //         $date = $parts[2];
+    //         $checkInTime = $parts[3];
+    //         $secret = $parts[4];
 
-            // Verify barcode is not expired (5 minutes validity)
-            $currentTime = time();
-            if (($currentTime - intval($timestamp)) > 300) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Barcode has expired. Please generate a new one.',
-                    'code' => 'BARCODE_EXPIRED'
-                ], 400);
-            }
+    //         // Verify barcode is not expired (5 minutes validity)
+    //         $currentTime = time();
+    //         if (($currentTime - intval($timestamp)) > 300) {
+    //             return response()->json([
+    //                 'success' => false,
+    //                 'message' => 'Barcode has expired. Please generate a new one.',
+    //                 'code' => 'BARCODE_EXPIRED'
+    //             ], 400);
+    //         }
 
-            // Verify secret hash
-            $dataString = $employeeId . ':' . $timestamp . ':' . $date . ':' . $checkInTime;
-            $expectedSecret = md5($dataString . env('BARCODE_SECRET', 'attendance_secret_2024'));
+    //         // Verify secret hash
+    //         $dataString = $employeeId . ':' . $timestamp . ':' . $date . ':' . $checkInTime;
+    //         $expectedSecret = md5($dataString . env('BARCODE_SECRET', 'attendance_secret_2024'));
 
-            if ($secret !== $expectedSecret) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Invalid security code'
-                ], 400);
-            }
+    //         if ($secret !== $expectedSecret) {
+    //             return response()->json([
+    //                 'success' => false,
+    //                 'message' => 'Invalid security code'
+    //             ], 400);
+    //         }
 
-            // Get employee data
-            $employee = $this->firebase->getEmployee($employeeId);
-            if (!$employee) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Employee not found'
-                ], 404);
-            }
+    //         // Get employee data
+    //         $employee = $this->firebase->getEmployee($employeeId);
+    //         if (!$employee) {
+    //             return response()->json([
+    //                 'success' => false,
+    //                 'message' => 'Employee not found'
+    //             ], 404);
+    //         }
 
-            // Get attendance record for verification
-            $attendanceRef = $this->firebase->getDatabase()
-                ->getReference("attendances/{$this->firebase->getCompanyId()}/{$date}/{$employeeId}");
+    //         // Get attendance record for verification
+    //         $attendanceRef = $this->firebase->getDatabase()
+    //             ->getReference("attendances/{$this->firebase->getCompanyId()}/{$date}/{$employeeId}");
 
-            $attendance = $attendanceRef->getValue();
+    //         $attendance = $attendanceRef->getValue();
 
-            if (!$attendance || !isset($attendance['checkIn'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No check-in record found for this date'
-                ], 400);
-            }
+    //         if (!$attendance || !isset($attendance['checkIn'])) {
+    //             return response()->json([
+    //                 'success' => false,
+    //                 'message' => 'No check-in record found for this date'
+    //             ], 400);
+    //         }
 
-            // Mark as verified
-            $verifiedData = [
-                'verified' => true,
-                'verified_at' => now()->toISOString(),
-                'verified_by' => $user['name'] ?? 'Admin',
-                'verification_method' => 'barcode_scan'
-            ];
+    //         // Mark as verified
+    //         $verifiedData = [
+    //             'verified' => true,
+    //             'verified_at' => now()->toISOString(),
+    //             'verified_by' => $user['name'] ?? 'Admin',
+    //             'verification_method' => 'barcode_scan'
+    //         ];
 
-            $attendanceRef->update($verifiedData);
+    //         $attendanceRef->update($verifiedData);
 
-            // Log the verification
-            $this->logBarcodeVerification([
-                'employee_id' => $employeeId,
-                'barcode_data' => $barcodeData,
-                'verified_by' => $user['name'] ?? 'Admin',
-                'verification_time' => now()->toISOString(),
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent()
-            ]);
+    //         // Log the verification
+    //         $this->logBarcodeVerification([
+    //             'employee_id' => $employeeId,
+    //             'barcode_data' => $barcodeData,
+    //             'verified_by' => $user['name'] ?? 'Admin',
+    //             'verification_time' => now()->toISOString(),
+    //             'ip_address' => $request->ip(),
+    //             'user_agent' => $request->userAgent()
+    //         ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Barcode verified successfully',
-                'data' => [
-                    'employee' => [
-                        'id' => $employeeId,
-                        'name' => $employee['name'],
-                        'department' => $employee['department'] ?? 'N/A',
-                        'position' => $employee['position'] ?? 'Staff'
-                    ],
-                    'attendance' => array_merge($attendance, $verifiedData),
-                    'verification' => [
-                        'time' => now()->format('H:i:s'),
-                        'date' => now()->format('Y-m-d'),
-                        'scanned_by' => $user['name'] ?? 'Admin'
-                    ]
-                ]
-            ]);
+    //         return response()->json([
+    //             'success' => true,
+    //             'message' => 'Barcode verified successfully',
+    //             'data' => [
+    //                 'employee' => [
+    //                     'id' => $employeeId,
+    //                     'name' => $employee['name'],
+    //                     'department' => $employee['department'] ?? 'N/A',
+    //                     'position' => $employee['position'] ?? 'Staff'
+    //                 ],
+    //                 'attendance' => array_merge($attendance, $verifiedData),
+    //                 'verification' => [
+    //                     'time' => now()->format('H:i:s'),
+    //                     'date' => now()->format('Y-m-d'),
+    //                     'scanned_by' => $user['name'] ?? 'Admin'
+    //                 ]
+    //             ]
+    //         ]);
+    //     } catch (\Exception $e) {
+    //         Log::error('Barcode verification error: ' . $e->getMessage());
 
-        } catch (\Exception $e) {
-            Log::error('Barcode verification error: ' . $e->getMessage());
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Verification failed: ' . $e->getMessage()
-            ], 500);
-        }
-    }
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Verification failed: ' . $e->getMessage()
+    //         ], 500);
+    //     }
+    // }
 
     /**
      * Log barcode verification
@@ -1039,7 +1163,6 @@ class AttendanceController extends Controller
                 'success' => true,
                 'data' => $result
             ]);
-
         } catch (\Exception $e) {
             Log::error('Get recent verifications error: ' . $e->getMessage());
 
@@ -1112,7 +1235,6 @@ class AttendanceController extends Controller
                     'message' => 'Today\'s attendance retrieved'
                 ]);
             }
-
         } catch (\Exception $e) {
             Log::error('API Today error: ' . $e->getMessage());
 
